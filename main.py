@@ -59,18 +59,63 @@ if not os.path.exists('./recordings'):
 async def on_ready():
    print(f'Bot avviato come {bot.user}')
 
+# @bot.command()
+# async def join(ctx):
+#    if not ctx.author.voice:
+#        return await ctx.send("Devi essere in un canale vocale!")
+   
+#    channel = ctx.author.voice.channel
+#    if ctx.voice_client:
+#        await ctx.voice_client.move_to(channel)
+#    else:
+#        vc = await channel.connect()
+#        vc.start_recording(AudioSink(), lambda s: finished_callback(s, ctx))
+#    await ctx.send("Mi sono unito al canale vocale e sto registrando")
+
+class VoiceClient:
+    def __init__(self):
+        self.recording = False
+
+voice_clients = {}
+
 @bot.command()
 async def join(ctx):
-   if not ctx.author.voice:
-       return await ctx.send("Devi essere in un canale vocale!")
-   
-   channel = ctx.author.voice.channel
-   if ctx.voice_client:
-       await ctx.voice_client.move_to(channel)
-   else:
-       vc = await channel.connect()
-       vc.start_recording(AudioSink(), lambda s: finished_callback(s, ctx))
-   await ctx.send("Mi sono unito al canale vocale e sto registrando")
+    if not ctx.author.voice:
+        return await ctx.send("Devi essere in un canale vocale!")
+    
+    channel = ctx.author.voice.channel
+    if ctx.voice_client:
+        await ctx.voice_client.move_to(channel)
+    else:
+        vc = await channel.connect()
+        voice_clients[ctx.guild.id] = VoiceClient()
+    await ctx.send("Mi sono unito al canale vocale")
+
+@bot.command()
+async def start(ctx):
+    if not ctx.voice_client:
+        return await ctx.send("Non sono in un canale vocale!")
+        
+    voice_client = voice_clients.get(ctx.guild.id)
+    if voice_client.recording:
+        return await ctx.send("Sto già registrando!")
+        
+    ctx.voice_client.start_recording(AudioSink(), lambda s: finished_callback(s, ctx))
+    voice_client.recording = True
+    await ctx.send("Inizio registrazione...")
+
+@bot.command()
+async def stop(ctx):
+    if not ctx.voice_client:
+        return await ctx.send("Non sono in un canale vocale!")
+        
+    voice_client = voice_clients.get(ctx.guild.id)
+    if not voice_client.recording:
+        return await ctx.send("Non sto registrando!")
+        
+    ctx.voice_client.stop_recording()
+    voice_client.recording = False
+    await ctx.send("Registrazione fermata")
 
 @bot.command()
 async def play(ctx):
@@ -90,8 +135,12 @@ async def play(ctx):
 @bot.command()
 async def leave(ctx):
    if ctx.voice_client:
-       ctx.voice_client.stop_recording()
+       voice_client = voice_clients.get(ctx.guild.id)
+       if voice_client.recording:
+           ctx.voice_client.stop_recording()
+           voice_client.recording = False
        await ctx.voice_client.disconnect()
+       voice_clients.pop(ctx.guild.id, None)
        await ctx.send("Ho lasciato il canale vocale")
 
 bot.run(TOKEN)
