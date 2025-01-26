@@ -10,6 +10,13 @@ RUN apt-get update && apt-get install -y \
     software-properties-common \
     python3 \
     python3-pip \
+    pkg-config \
+    portaudio19-dev \
+    python3-dev \
+    libcairo2-dev \
+    ffmpeg \
+    libopus0 \
+    libopusfile0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

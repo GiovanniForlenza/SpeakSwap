@@ -1,5 +1,5 @@
 {
-    "name": "Ubuntu Node.js",
+    "name": "Ubuntu Python",
     "build": {
         "dockerfile": "../Dockerfile"
     },
@@ -9,8 +9,8 @@
                 "terminal.integrated.shell.linux": "/bin/bash"
             },
             "extensions": [
-                "ms-vscode.vscode-node-azure-pack",
-                "dbaeumer.vscode-eslint"
+                "ms-python.python",
+                "ms-python.vscode-pylance"
             ]
         }
     },
