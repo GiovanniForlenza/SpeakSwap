@@ -1,3 +1,4 @@
-node_modules
+discord-bot/recordings
+discord-bot/.env
 recordings
-.env
+frontend/node_modules
