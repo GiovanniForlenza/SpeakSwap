@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import os
+import aiohttp
 from datetime import datetime
 
 load_dotenv()
@@ -49,6 +50,22 @@ async def finished_callback(sink, ctx):
 
 if not os.path.exists('recordings'):
     os.makedirs('recordings')
+
+async def send_to_webapp(audio_file_path):
+    """
+    Invia il file audio alla webapp e restituisce il codice conversazione
+    """
+    async with aiohttp.ClientSession() as session:
+        with open(audio_file_path, 'rb') as f:
+            form_data = aiohttp.FormData()
+            form_data.add_field('file',
+                              f,
+                              filename=os.path.basename(audio_file_path),
+                              content_type='audio/wav')
+            
+            async with session.post('http://localhost:8000/upload-audio', data=form_data) as response:
+                result = await response.json()
+                return result['conversation_code']
 
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
@@ -143,4 +160,29 @@ async def leave(ctx):
        voice_clients.pop(ctx.guild.id, None)
        await ctx.send("Ho lasciato il canale vocale")
 
+@bot.command()
+async def translate(ctx):
+    try:
+        # Ottieni l'ultimo file registrato dalla cartella recordings
+        files = sorted(os.listdir('./recordings'), reverse=True)
+        if not files:
+            await ctx.send("Nessuna registrazione trovata da tradurre")
+            return
+            
+        latest_recording = f"./recordings/{files[0]}"
+        
+        # Invia il file alla webapp e ottieni il codice
+        conversation_code = await send_to_webapp(latest_recording)
+        
+        # Invia il codice all'utente in privato
+        await ctx.author.send(f"Il codice della tua conversazione è: {conversation_code}")
+        # Invia anche un messaggio nel canale
+        await ctx.send("Ti ho inviato il codice della conversazione in privato!")
+        
+    except Exception as e:
+        print(f"Errore durante l'invio del file: {e}")
+        await ctx.author.send("Si è verificato un errore durante l'elaborazione della richiesta.")
+        # Log dell'errore più dettagliato
+        print(f"Dettagli errore: {str(e)}")
+        
 bot.run(TOKEN)
