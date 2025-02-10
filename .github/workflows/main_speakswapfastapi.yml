@@ -22,20 +22,28 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.8'
+          python-version: "3.8"
 
       - name: Create and start virtual environment
         run: |
           python -m venv venv
           source venv/bin/activate
-      
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
-        
-      # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # - name: Run FastAPI tests
+      #   run: |
+      #     pip install pytest
+      #     pytest api/tests/
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        run: |
+          cd api
+          zip release.zip ./* -r
+          mv release.zip ../
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
@@ -49,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     environment:
-      name: 'Production'
+      name: "Production"
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
     permissions:
       id-token: write #This is required for requesting the JWT
@@ -64,7 +72,6 @@ jobs:
       - name: Unzip artifact for deployment
         run: unzip release.zip
 
-      
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -72,10 +79,9 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8FD1A262971E40128A8AD3E7E6F11636 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3FF67D61009A4DB58B2F064F79D29709 }}
 
-      - name: 'Deploy to Azure Web App'
+      - name: "Deploy to Azure Web App"
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'SpeakSwapFastAPI'
-          slot-name: 'Production'
-          
+          app-name: "SpeakSwapFastAPI"
+          slot-name: "Production"
