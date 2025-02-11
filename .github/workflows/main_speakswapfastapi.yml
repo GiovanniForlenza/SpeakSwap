@@ -21,13 +21,16 @@ jobs:
         with:
           python-version: '3.8'
 
-      - name: Install Dependencies
+      - name: Set up Virtual Environment
         run: |
-          python -m pip install --upgrade pip
-          pip install -r api/requirements_api.txt
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r api/requirements_api.txt --constraint api/constraints.txt
 
 #      - name: Run Tests
 #        run: |
+#          source venv/bin/activate
 #          pip install pytest
 #          pytest api/tests/
 
@@ -66,10 +69,12 @@ jobs:
         with:
           python-version: '3.8'
 
-      - name: Install Dependencies
+      - name: Set up Virtual Environment
         run: |
-          python -m pip install --upgrade pip
-          pip install -r api/requirements_api.txt
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r api/requirements_api.txt --constraint api/constraints.txt
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -77,7 +82,6 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_7C7485AF683845798B8C0E1E241A1E8E }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8FD1A262971E40128A8AD3E7E6F11636 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3FF67D61009A4DB58B2F064F79D29709 }}
-
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
