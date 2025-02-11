@@ -58,6 +58,9 @@ jobs:
         with:
           name: python-app
 
+      - name: Extract Artifact
+        run: unzip release.zip
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
