@@ -3,7 +3,7 @@ name: Deploy FastAPI to Azure Web App
 on:
   push:
     branches:
-      - main  # Modifica se usi un altro branch per il deployment
+      - main
 
 env:
   AZURE_WEBAPP_NAME: SpeakSwapFastAPI
@@ -12,6 +12,9 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Permesso per OIDC login
+      contents: read
 
     steps:
       - name: Checkout repository
