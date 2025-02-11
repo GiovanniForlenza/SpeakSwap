@@ -1,91 +1,48 @@
-name: Build and Deploy Python app to Azure Web App - SpeakSwapFastAPI
+name: Deploy FastAPI to Azure Web App
 
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - main  # Modifica se usi un altro branch per il deployment
+
+env:
+  AZURE_WEBAPP_NAME: SpeakSwapFastAPI
+  PYTHON_VERSION: "3.8"
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
-      - name: Checkout Code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Set up Virtual Environment
+      - name: Install dependencies
         run: |
-          python -m venv venv
-          source venv/bin/activate
+          python -m venv antenv
+          source antenv/bin/activate
           pip install --upgrade pip
-          pip install -r api/requirements_api.txt --constraint api/constraints.txt
+          pip install -r api/requirements_api.txt
 
-#      - name: Run Tests
-#        run: |
-#          source venv/bin/activate
-#          pip install pytest
-#          pytest api/tests/
-
-      - name: Archive Application
+      - name: Archive artifact
         run: |
-          zip -r release.zip .
-        shell: bash
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-app
-          path: release.zip
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: python-app
-
-      - name: Extract Artifact
-        run: unzip release.zip
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.8'
-
-      - name: Set up Virtual Environment
-        run: |
-          python -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install -r api/requirements_api.txt --constraint api/constraints.txt
-
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_7C7485AF683845798B8C0E1E241A1E8E }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8FD1A262971E40128A8AD3E7E6F11636 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3FF67D61009A4DB58B2F064F79D29709 }}
+          zip -r release.zip . -x "antenv/*" ".git/*"
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
-        id: deploy-to-webapp
         with:
-          app-name: 'SpeakSwapFastAPI'
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
           package: release.zip
+          slot-name: production
+        env:
+          pythonLocation: /opt/hostedtoolcache/Python/3.8.18/x64
+          PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.8.18/x64/lib/pkgconfig
+          Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.8.18/x64
+          Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.8.18/x64
+          Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.8.18/x64
+          LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.8.18/x64/lib
