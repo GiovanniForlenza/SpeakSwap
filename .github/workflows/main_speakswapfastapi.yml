@@ -33,16 +33,15 @@ jobs:
         run: |
           zip -r release.zip . -x "antenv/*" ".git/*"
 
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID }}
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           package: release.zip
-          slot-name: production
-        env:
-          pythonLocation: /opt/hostedtoolcache/Python/3.8.18/x64
-          PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.8.18/x64/lib/pkgconfig
-          Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.8.18/x64
-          Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.8.18/x64
-          Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.8.18/x64
-          LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.8.18/x64/lib
