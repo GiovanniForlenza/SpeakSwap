@@ -30,7 +30,7 @@ jobs:
           source venv/bin/activate
       
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libgirepository1.0-dev gir1.2-gtk-3.0
+        run: sudo apt-get update && sudo apt-get install -y python3-apt
 
       - name: Install dependencies
         run: |
