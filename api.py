@@ -6,6 +6,7 @@ import os
 import json
 from enum import Enum
 from datetime import datetime
+from fastapi.responses import FileResponse
 
 app = FastAPI()
 
@@ -79,6 +80,14 @@ async def get_conversation(code: str):
         "has_translated_audio": bool(conversation.translated_audio),
         "original_file": os.path.basename(conversation.original_file)
     }
+
+@app.get("/audio/{code}")
+async def get_audio(code: str):
+    if code not in conversations:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    conversation = conversations[code]
+    return FileResponse(conversation.original_file, media_type="audio/wav")
 
 @app.get("/test")
 async def test_endpoint():
