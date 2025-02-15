@@ -2,3 +2,5 @@ discord-bot/recordings
 discord-bot/.env
 recordings
 frontend/node_modules
+api/audio_files
+azure_ai/.env
