@@ -5,3 +5,5 @@ frontend/node_modules
 api/audio_files
 azure_ai/.env
 api/.env
+translated_audio
+api/translated_audio
