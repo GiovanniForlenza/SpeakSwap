@@ -186,4 +186,25 @@ async def translate(ctx):
         # Log dell'errore più dettagliato
         print(f"Dettagli errore: {str(e)}")
         
+@bot.command()
+async def play_translated(ctx, code: str):
+    try:
+        os.makedirs("translated_audio", exist_ok=True)
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://localhost:8000/translated-audio/{code}") as response:
+                if response.status == 200:
+                    api_audio_path = f"/workspaces/SpeakSwap/api/translated_audio/{code}.wav"
+                    
+                    voice = ctx.voice_client
+                    if voice:
+                        source = discord.FFmpegPCMAudio(api_audio_path)
+                        voice.play(source)
+                        await ctx.send(f"Riproduco audio tradotto per la conversazione {code}")
+                else:
+                    await ctx.send(f"Errore durante il recupero dell'audio tradotto: Status {response.status}")
+    except Exception as e:
+        await ctx.send(f"Errore: {str(e)}")
+        print(f"Errore dettagliato: {e}") 
+
 bot.run(TOKEN)

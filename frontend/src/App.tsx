@@ -74,6 +74,17 @@ function App() {
     }
   };
 
+  const playTranslatedAudio = async (code: string) => {
+    try {
+        const audioUrl = `${API_BASE_URL}/translated-audio/${code}`;
+        const audio = new Audio(audioUrl);
+        await audio.play();
+    } catch (err) {
+        console.error('Error playing translated audio:', err);
+        setError('Errore durante la riproduzione dell\'audio tradotto');
+    }
+  };
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     
@@ -136,11 +147,13 @@ function App() {
                 Riproduci Audio Originale
               </button>
               
-              {conversation.translated_text && (
-                <div className="translation">
-                  <h3>Testo tradotto:</h3>
-                  <p>{conversation.translated_text}</p>
-                </div>
+              {conversation?.translated_text && (
+              <button 
+                  className="play-audio"
+                  onClick={() => playTranslatedAudio(conversationCode)}
+              >
+                  Riproduci Audio Tradotto
+              </button>
               )}
               
               {conversation.has_translated_audio && (
