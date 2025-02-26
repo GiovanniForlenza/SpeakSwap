@@ -7,3 +7,5 @@ azure_ai/.env
 api/.env
 translated_audio
 api/translated_audio
+temp
+generated_audio
