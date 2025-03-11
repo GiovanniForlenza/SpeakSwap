@@ -1,0 +1,115 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.translation-controls {
+  margin-top: 20px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+.translation-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.translation-button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.translation-button.start {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.translation-button.stop {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.recent-translations {
+  margin-top: 15px;
+}
+
+.recent-translations h4 {
+  margin-bottom: 10px;
+}
+
+.recent-translations ul {
+  list-style: none;
+  padding: 0;
+}
+
+.recent-translations li {
+  margin-bottom: 15px;
+  padding: 10px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+}
+
+.translation-header {
+  margin-bottom: 5px;
+  font-size: 0.9em;
+}
+
+.translation-header span {
+  color: #6c757d;
+  margin-left: 5px;
+}
+
+.translation-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.original-text {
+  font-style: italic;
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.translated-text {
+  font-weight: bold;
+}
+
+.user-language {
+  font-size: 0.8em;
+  color: #6c757d;
+  margin-left: 5px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.form-group select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+}
