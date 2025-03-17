@@ -1,2 +1,5 @@
 /chat-server/node_modules
 /chat-server/.env
+/AudioServer/bin
+/AudioServer/obj
+/AudioServer/appsettings.json
