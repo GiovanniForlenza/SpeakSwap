@@ -20,8 +20,8 @@ function RoomPage() {
   const [speakingUsers, setSpeakingUsers] = useState({});
   const [isStreaming, setIsStreaming] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
-  const [debugInfo, setDebugInfo] = useState('');
-  const [audioStats, setAudioStats] = useState({
+  const [, setDebugInfo] = useState('');
+  const [, setAudioStats] = useState({
     sent: 0,
     received: 0,
     lastSentSize: 0,
@@ -161,63 +161,6 @@ function RoomPage() {
     setMicLevel(level);
   }, []);
 
-  // Funzione per verificare le capacità audio del browser
-  const checkAudioCapabilities = () => {
-    // Verifica formati audio supportati
-    const audio = document.createElement('audio');
-    const formats = [
-      { type: 'audio/webm', codec: 'codecs=opus' },
-      { type: 'audio/webm', codec: '' },
-      { type: 'audio/ogg', codec: 'codecs=opus' },
-      { type: 'audio/ogg', codec: '' },
-      { type: 'audio/mp4', codec: 'codecs=mp4a.40.5' },
-      { type: 'audio/mp4', codec: '' },
-      { type: 'audio/mpeg', codec: '' },
-      { type: 'audio/wav', codec: '' }
-    ];
-
-    let results = 'Formati audio supportati dal browser:\n';
-    formats.forEach(format => {
-      const mimeType = format.codec ? `${format.type};${format.codec}` : format.type;
-      const supportLevel = audio.canPlayType(mimeType);
-      results += `${mimeType}: ${supportLevel || 'non supportato'}\n`;
-    });
-
-    // Verifica MediaRecorder
-    let recorderResults = 'Formati MediaRecorder supportati:\n';
-    if (typeof MediaRecorder !== 'undefined') {
-      formats.forEach(format => {
-        const mimeType = format.codec ? `${format.type};${format.codec}` : format.type;
-        const isSupported = MediaRecorder.isTypeSupported(mimeType);
-        recorderResults += `${mimeType}: ${isSupported ? 'supportato' : 'non supportato'}\n`;
-      });
-    } else {
-      recorderResults += 'MediaRecorder API non disponibile in questo browser.';
-    }
-
-    // Verifica Web Audio API
-    let audioContextResults = '';
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      audioContextResults = `Web Audio API supportata.\nSample rate: ${ctx.sampleRate}Hz\nStato: ${ctx.state}\n`;
-      
-      // Pulisci l'AudioContext per non lasciare risorse aperte
-      if (ctx.state !== 'closed') {
-        ctx.close();
-      }
-    } catch (e) {
-      audioContextResults = `Web Audio API errore: ${e.message}`;
-    }
-
-    // Combina e visualizza i risultati
-    const allResults = `${results}\n${recorderResults}\n${audioContextResults}`;
-    setDebugInfo(allResults);
-    console.log(allResults);
-    
-    // Ritorna un semplice messaggio
-    return 'Verifica delle capacità audio completata. Vedi la console e il pannello di debug.';
-  };
-
   // Connessione a SignalR
   const connectToSignalR = async () => {
     try {
@@ -300,9 +243,6 @@ function RoomPage() {
           for (let i = 0; i < byteCharacters.length; i++) {
             byteArray[i] = byteCharacters.charCodeAt(i);
           }
-          
-          // Crea un blob audio
-          const audioBlob = new Blob([byteArray], { type: 'audio/wav' });
           
           // Usa il WebAudioPlayer per riprodurre l'audio tradotto
           if (playerRef.current) {
@@ -543,18 +483,6 @@ function RoomPage() {
           {connectionError && <div className="error-message">{connectionError}</div>}
         </div>
       </div>
-      
-      {/* <div className="debug-panel">
-        <div className="debug-header">
-          <h3>Debug Info</h3>
-          <button onClick={() => setDebugInfo('')} className="clear-button">Clear</button>
-        </div>
-        <div className="audio-stats">
-          <p>Audio inviato: {audioStats.sent} chunks (ultimo: {audioStats.lastSentSize} bytes)</p>
-          <p>Audio ricevuto: {audioStats.received} chunks (ultimo: {audioStats.lastReceivedSize} bytes)</p>
-        </div>
-        <pre className="debug-log">{debugInfo}</pre>
-      </div> */}
     </div>
   );
 }
