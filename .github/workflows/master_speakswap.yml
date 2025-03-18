@@ -25,15 +25,15 @@ jobs:
 
       - name: npm install, build, and test
         run: |
-          cd chat-room-app
+          cd chat-room-app/src
           npm install
           npm run build --if-present
           npm run test --if-present
 
       - name: Zip artifact for deployment
         run: |
-          cd chat-room-app
-          run: zip release.zip ./* -r
+          cd chat-room-app/src
+          run: zip -r ../chat-room-app/src/release.zip .
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
