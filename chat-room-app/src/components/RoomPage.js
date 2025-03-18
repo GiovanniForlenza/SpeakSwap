@@ -34,7 +34,7 @@ function RoomPage() {
   const playerRef = useRef(null);
   const hasConnectedRef = useRef(false);
   
-  // Inizializza il servizio audio e la connessione
+
   useEffect(() => {
     if (!username || !roomName) {
       navigate('/');
@@ -50,6 +50,7 @@ function RoomPage() {
     return () => {
       releaseResources();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, roomName, navigate]);
   
   // Inizializza i servizi audio
