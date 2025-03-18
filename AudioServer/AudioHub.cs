@@ -1,5 +1,7 @@
+using AudioChatServer.Services;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
+
 
 namespace AudioChatServer
 {
@@ -8,11 +10,14 @@ namespace AudioChatServer
     {
         public string Username { get; set; } = string.Empty;
         public string RoomName { get; set; } = string.Empty;
+        public string Language { get; set; } = "it";
     }
 
     public class AudioHub : Hub
     {
         private readonly ILogger<AudioHub> _logger;
+        private readonly SpeechService _speechService;
+        private readonly TranslationService _translationService;
 
         // Dizionario thread-safe per memorizzare le connessioni utente
         private static readonly ConcurrentDictionary<string, UserConnection> _connections =
@@ -22,9 +27,11 @@ namespace AudioChatServer
         private static readonly ConcurrentDictionary<string, HashSet<string>> _userConnections =
             new ConcurrentDictionary<string, HashSet<string>>();
 
-        public AudioHub(ILogger<AudioHub> logger)
+        public AudioHub(ILogger<AudioHub> logger, SpeechService speechService, TranslationService translationService)
         {
             _logger = logger;
+            _speechService = speechService;
+            _translationService = translationService;
         }
 
         // Utility privata per ottenere una chiave utente unica (username + room)
@@ -34,18 +41,19 @@ namespace AudioChatServer
         }
 
         // Metodo chiamato quando un utente si unisce a una stanza
-        public async Task JoinRoom(string username, string roomName)
+        public async Task JoinRoom(string username, string roomName, string language)
         {
             try
             {
                 var connectionId = Context.ConnectionId;
-                _logger.LogInformation($"Utente {username} sta tentando di unirsi alla stanza {roomName} con ConnectionId {connectionId}");
+                _logger.LogInformation($"Utente {username} sta tentando di unirsi alla stanza {roomName} con lingua {language} con ConnectionId {connectionId}");
 
                 // Memorizza le informazioni di connessione dell'utente
                 _connections[connectionId] = new UserConnection
                 {
                     Username = username,
-                    RoomName = roomName
+                    RoomName = roomName,
+                    Language = language
                 };
 
                 // Aggiorna la mappa delle connessioni utente
@@ -260,40 +268,151 @@ namespace AudioChatServer
             }
         }
 
-        // Metodo per inviare dati audio PCM
-        public async Task SendPCMAudio(string pcmData)
+        // Implementazione per gestire l'audio PCM e tradurlo
+        public async Task SendPCMAudio(string jsonData)
         {
             try
             {
                 var connectionId = Context.ConnectionId;
-                _logger.LogInformation($"[PCM-DEBUG] SendPCMAudio chiamato da ConnectionId {connectionId}, lunghezza dati: {pcmData?.Length ?? 0} bytes");
 
-                if (string.IsNullOrEmpty(pcmData))
+                if (!_connections.TryGetValue(connectionId, out var userConnection))
                 {
-                    _logger.LogWarning($"SendPCMAudio chiamato con pcmData vuoto da {connectionId}");
+                    _logger.LogWarning($"Connessione non trovata per ConnectionId {connectionId} in SendPCMAudio");
                     return;
                 }
 
-                if (_connections.TryGetValue(connectionId, out var userConnection))
-                {
-                    var senderUsername = userConnection.Username;
-                    var roomName = userConnection.RoomName;
-                    _logger.LogInformation($"[PCM-DEBUG] Audio PCM inviato da utente {senderUsername} nella stanza {roomName}");
+                var senderUsername = userConnection.Username;
+                var roomName = userConnection.RoomName;
+                var sourceLanguage = userConnection.Language;
 
-                    // Invia a tutti gli altri nella stanza tranne il mittente
-                    await Clients.OthersInGroup(roomName).SendAsync("ReceivePCMAudio", senderUsername, pcmData);
-                    _logger.LogInformation($"[PCM-DEBUG] Audio PCM inviato agli altri utenti nella stanza {roomName}");
-                }
-                else
+                _logger.LogInformation($"Audio PCM ricevuto da {senderUsername} in lingua {sourceLanguage}");
+
+                // Deserializza i dati audio
+                var audioPacket = System.Text.Json.JsonSerializer.Deserialize<AudioPacket>(jsonData);
+                if (audioPacket == null)
                 {
-                    _logger.LogWarning($"Connessione non trovata per ConnectionId {connectionId} in SendPCMAudio");
+                    _logger.LogWarning("Impossibile deserializzare i dati audio");
+                    return;
                 }
-                
-            } catch (Exception ex)
+
+                // Converte base64 in formato adatto per Azure Speech
+                var audioBase64 = audioPacket.data;
+
+                // 1. Converti audio in testo con Speech-to-Text
+                var recognizedText = await _speechService.SpeechToTextAsync(audioBase64, sourceLanguage);
+                if (string.IsNullOrEmpty(recognizedText))
+                {
+                    _logger.LogWarning("Nessun testo riconosciuto dall'audio");
+                    return;
+                }
+
+                _logger.LogInformation($"Testo riconosciuto: '{recognizedText}'");
+
+                // 2. Ottieni tutte le lingue degli utenti nella stanza (escluso il mittente)
+                var targetLanguages = GetLanguagesInRoom(roomName, senderUsername);
+                if (targetLanguages.Count == 0)
+                {
+                    _logger.LogInformation("Nessuna lingua target trovata nella stanza");
+                    return;
+                }
+
+                // 3. Traduci il testo nelle lingue target
+                var translations = await _translationService.TranslateTextAsync(
+                    recognizedText, sourceLanguage, targetLanguages);
+
+                // 4. Per ogni traduzione, converti il testo in audio
+                foreach (var translation in translations)
+                {
+                    var targetLang = translation.Key;
+                    var translatedText = translation.Value;
+
+                    // Converti il testo tradotto in audio
+                    var translatedAudioBase64 = await _speechService.TextToSpeechAsync(translatedText, targetLang);
+                    if (string.IsNullOrEmpty(translatedAudioBase64))
+                    {
+                        _logger.LogWarning($"Generazione audio fallita per la lingua {targetLang}");
+                        continue;
+                    }
+
+                    // 5. Invia l'audio tradotto solo agli utenti con quella lingua
+                    _logger.LogInformation($"Attempting to send translated audio for language {targetLang}");
+                    await SendTranslatedAudioToUsers(roomName, senderUsername, targetLang, translatedText, translatedAudioBase64);
+                    _logger.LogInformation($"Completed sending translated audio for language {targetLang}");
+                }
+            }
+            catch (Exception ex)
             {
                 _logger.LogError(ex, $"Errore durante SendPCMAudio da ConnectionId {Context.ConnectionId}");
-                throw;
             }
-        }      
+        }
+
+
+        private List<string> GetLanguagesInRoom(string roomName, string exceptUsername)
+        {
+            var languages = new HashSet<string>();
+
+            foreach (var conn in _connections)
+            {
+                if (conn.Value.RoomName == roomName && conn.Value.Username != exceptUsername)
+                {
+                    languages.Add(conn.Value.Language);
+                }
+            }
+
+            return languages.ToList();
+        }
+
+
+        // Invia l'audio tradotto agli utenti con una specifica lingua
+        private async Task SendTranslatedAudioToUsers(string roomName, string senderUsername,
+            string targetLanguage, string translatedText, string audioBase64)
+        {
+            try
+            {
+                // Trova tutte le connessioni di utenti con la lingua target
+                var targetConnectionIds = _connections
+                    .Where(c => c.Value.RoomName == roomName &&
+                        c.Value.Language == targetLanguage &&
+                        c.Value.Username != senderUsername)
+                    .Select(c => c.Key)
+                    .ToList();
+
+                if (targetConnectionIds.Count == 0)
+                {
+                    _logger.LogInformation($"Nessun utente con lingua {targetLanguage} trovato nella stanza {roomName}");
+                    return;
+                }
+
+                // Crea un pacchetto con l'audio tradotto
+                var translatedPacket = new
+                {
+                    senderUsername,
+                    language = targetLanguage,
+                    text = translatedText,
+                    audio = audioBase64
+                };
+
+                var jsonPacket = System.Text.Json.JsonSerializer.Serialize(translatedPacket);
+
+                // Invia l'audio tradotto agli utenti target
+                await Clients.Clients(targetConnectionIds).SendAsync("ReceiveTranslatedAudio",
+                    senderUsername, targetLanguage, translatedText, audioBase64);
+
+                _logger.LogInformation($"Audio tradotto inviato a {targetConnectionIds.Count} utenti con lingua {targetLanguage}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Errore nell'invio dell'audio tradotto in {targetLanguage}");
+            }
+        }
+
+        // Classe per deserializzare i dati audio
+        private class AudioPacket
+        {
+            public int sampleRate { get; set; }
+            public int channelCount { get; set; }
+            public int length { get; set; }
+            public string data { get; set; } = string.Empty;
+        }
     }
 }

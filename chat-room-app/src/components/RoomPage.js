@@ -10,6 +10,7 @@ function RoomPage() {
   const [searchParams] = useSearchParams();
   const username = searchParams.get('username') || localStorage.getItem('audioChat_username');
   const navigate = useNavigate();
+  const language = searchParams.get('language') || localStorage.getItem('audioChat_language') || 'it';
   
   // Stati
   const [isConnected, setIsConnected] = useState(false);
@@ -288,6 +289,48 @@ function RoomPage() {
         }
       });
 
+      connection.on('ReceiveTranslatedAudio', (senderUsername, language, translatedText, audioBase64) => {
+        try {
+          console.log(`Audio tradotto ricevuto da ${senderUsername} in ${language}: "${translatedText}"`);
+          
+          // Converti base64 in ArrayBuffer
+          const byteCharacters = atob(audioBase64);
+          const byteArray = new Uint8Array(byteCharacters.length);
+          
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteArray[i] = byteCharacters.charCodeAt(i);
+          }
+          
+          // Crea un blob audio
+          const audioBlob = new Blob([byteArray], { type: 'audio/wav' });
+          
+          // Usa il WebAudioPlayer per riprodurre l'audio tradotto
+          if (playerRef.current) {
+            // Crea dati audio conformi al formato atteso da playPCMAudio
+            const audioData = {
+              sampleRate: 16000, // Valore predefinito per Azure Speech
+              channelCount: 1,
+              length: byteArray.length,
+              data: byteArray.buffer
+            };
+            
+            // Riproduci l'audio
+            playerRef.current.playPCMAudio(senderUsername, audioData);
+          }
+          
+          // Aggiorna le statistiche
+          setAudioStats(prev => ({
+            ...prev,
+            received: prev.received + 1,
+            lastReceivedSize: audioBase64.length
+          }));
+          
+        } catch (error) {
+          console.error('Errore nella riproduzione dell\'audio tradotto:', error);
+          setDebugInfo(prev => `${prev}\nErrore audio tradotto: ${error.message}`);
+        }
+      });
+
       // Gestione degli stati di connessione
       connection.onclose(error => {
         console.log('Connessione chiusa:', error);
@@ -305,7 +348,7 @@ function RoomPage() {
         setMessage('Riconnesso al server!');
         
         // Rientra nella stanza dopo la riconnessione
-        connection.invoke('JoinRoom', username, roomName)
+        connection.invoke('JoinRoom', username, roomName, language)
           .catch(err => {
             console.error('Errore nel rientrare nella stanza:', err);
           });
@@ -315,7 +358,7 @@ function RoomPage() {
       await connection.start();
       
       // Unisciti alla stanza
-      await connection.invoke('JoinRoom', username, roomName);
+      await connection.invoke('JoinRoom', username, roomName, language);
       
       // Salva il riferimento
       connectionRef.current = connection;

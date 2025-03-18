@@ -5,6 +5,7 @@ import './HomePage.css';
 function HomePage() {
   const [username, setUsername] = useState('');
   const [roomName, setRoomName] = useState('');
+  const [language, setLanguage] = useState('it');
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
@@ -12,7 +13,8 @@ function HomePage() {
   useEffect(() => {
     const savedUsername = localStorage.getItem('audioChat_username');
     const savedRoomName = localStorage.getItem('audioChat_roomName');
-    
+    const savedLanguage = localStorage.getItem('audioChat_language');
+
     if (savedUsername) {
       setUsername(savedUsername);
     }
@@ -20,6 +22,11 @@ function HomePage() {
     if (savedRoomName) {
       setRoomName(savedRoomName);
     }
+
+    if (savedLanguage) {
+      setLanguage(savedLanguage);
+    }
+
   }, []);
 
   const handleJoinRoom = (e) => {
@@ -38,10 +45,19 @@ function HomePage() {
     // Salva le informazioni nella sessione
     localStorage.setItem('audioChat_username', username);
     localStorage.setItem('audioChat_roomName', roomName);
+    localStorage.setItem('audioChat_language', language);
     
     // Naviga alla stanza
-    navigate(`/room/${roomName}?username=${encodeURIComponent(username)}`);
+    navigate(`/room/${roomName}?username=${encodeURIComponent(username)}&language=${language}`);
   };
+
+  const supportedLanguages = [
+    { code: 'it', name: 'Italiano' },
+    { code: 'en', name: 'English' },
+    { code: 'fr', name: 'Français' },
+    { code: 'de', name: 'Deutsch' },
+    { code: 'es', name: 'Español' }
+  ];
 
   return (
     <div className="home-container">
@@ -74,6 +90,22 @@ function HomePage() {
             />
           </div>
           
+          <div className="form-group">
+            <label htmlFor="language">Lingua:</label>
+            <select
+              id="language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              required
+            >
+              {supportedLanguages.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {error && <div className="error-message">{error}</div>}
           
           <button type="submit" className="join-button">

@@ -1,5 +1,6 @@
 using AudioChatServer;
 using Microsoft.Azure.SignalR;
+using AudioChatServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,15 +17,19 @@ builder.Services.AddCors(options =>
     });
 });
 
+builder.Services.AddSingleton<SpeechService>();
+
+builder.Services.AddSingleton<TranslationService>();
+
 // Configura SignalR con Azure SignalR Service con ServerStickyMode per connessioni stabili
 builder.Services.AddSignalR(hubOptions =>
 {
     // Aumenta il limite dimensione messaggi per supportare audio
     hubOptions.MaximumReceiveMessageSize = 1024 * 1024; // 1MB
-    
+
     // Abilita dettagli degli errori per il debug
     hubOptions.EnableDetailedErrors = true;
-    
+
     // Aumenta il timeout di disconnessione
     hubOptions.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
     hubOptions.KeepAliveInterval = TimeSpan.FromSeconds(15);
@@ -32,13 +37,13 @@ builder.Services.AddSignalR(hubOptions =>
 .AddAzureSignalR(options =>
 {
     options.ConnectionString = builder.Configuration["Azure:SignalR:ConnectionString"];
-    
+
     // Imposta la modalità ServerStickyMode per mantenere connessioni più stabili
     options.ServerStickyMode = ServerStickyMode.Required;
-    
+
     // Usa InitialHubServerConnectionCount invece di ConnectionCount (obsoleto)
     options.InitialHubServerConnectionCount = 5;
-    
+
     // Configurazione per la gestione graceful shutdown
     options.GracefulShutdown.Mode = GracefulShutdownMode.WaitForClientsClose;
     options.GracefulShutdown.Timeout = TimeSpan.FromSeconds(30);
