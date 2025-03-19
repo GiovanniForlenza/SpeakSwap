@@ -30,7 +30,7 @@ jobs:
       uses: docker/build-push-action@v3
       with:
         push: true
-        tags: speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername_ee46ba693db24d71a6b6482c411394de }}/speakswap_audioserver:${{ github.sha }}
+        tags: speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername }}/speakswap_audioserver:${{ github.sha }}
         file: ./Dockerfile
 
   deploy:
@@ -48,4 +48,4 @@ jobs:
         app-name: 'speakswapserver'
         slot-name: 'production'
         publish-profile: ${{ secrets.AzureAppService_PublishProfile_f06d236bbb794bf1864413cf17ce1115 }}
-        images: 'speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername_ee46ba693db24d71a6b6482c411394de }}/speakswap_audioserver:${{ github.sha }}'
+        images: 'speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername }}/speakswap_audioserver:${{ github.sha }}'
