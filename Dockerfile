@@ -46,14 +46,14 @@ RUN cd chat-room-app && npm run build
 RUN cd AudioServer && dotnet publish -c Release -o /app/AudioServer/publish
 
 # Esponi le porte per React e ASP.NET
-EXPOSE 3000 80 443
+EXPOSE 8081 3000
 
 # Script di avvio per eseguire entrambi i servizi
 RUN echo '#!/bin/bash\n\
-    # Avvia il server ASP.NET in background\n\
-    dotnet /app/AudioServer/publish/AudioServer.dll --urls="http://0.0.0.0:80;https://0.0.0.0:443" &\n\
-    # Avvia il server React\n\
-    cd /app/chat-room-app && npm start\n\
+    # Avvia il server React in background\n\
+    cd /app/chat-room-app && npx serve -s build -l 3000 &\n\
+    # Avvia il server ASP.NET in foreground (mantiene il container in esecuzione)\n\
+    dotnet /app/AudioServer/publish/AudioServer.dll --urls="http://0.0.0.0:8081"\n\
     ' > /app/start.sh
 
 RUN chmod +x /app/start.sh
