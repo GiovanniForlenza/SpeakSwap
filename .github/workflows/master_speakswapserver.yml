@@ -23,8 +23,8 @@ jobs:
       uses: docker/login-action@v2
       with:
         registry: https://speakswapregistry.azurecr.io/
-        username: ${{ secrets.AzureAppService_ContainerUsername_ee46ba693db24d71a6b6482c411394de }}
-        password: ${{ secrets.AzureAppService_ContainerPassword_f71c54ab833b46dc8ae55c6e0b87e447 }}
+        username: ${{ secrets.AzureAppService_ContainerUsername }}
+        password: ${{ secrets.AzureAppService_ContainerPassword }}
 
     - name: Build and push container image to registry
       uses: docker/build-push-action@v3
