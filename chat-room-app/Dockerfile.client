@@ -1,0 +1,24 @@
+FROM node:20 AS build
+WORKDIR /app
+
+# Copia e installa le dipendenze
+COPY package*.json ./
+RUN npm install
+
+# Copia il resto del codice sorgente
+COPY . ./
+
+# Configura l'URL del server - sostituisci con il tuo URL del server ASP.NET in produzione
+ARG SERVER_URL=http://localhost:8081
+ENV REACT_APP_API_URL=${SERVER_URL}
+
+# Costruisci l'app
+RUN npm run build
+
+# Fase di produzione - usa un server leggero per servire i file statici
+FROM node:20-alpine
+WORKDIR /app
+RUN npm install -g serve
+COPY --from=build /app/build ./build
+EXPOSE 3000
+CMD ["serve", "-s", "build", "-l", "3000"]
