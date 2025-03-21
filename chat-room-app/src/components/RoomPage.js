@@ -171,9 +171,9 @@ function RoomPage() {
       
       // Configura la connessione
       const connection = new signalR.HubConnectionBuilder()
-        .withUrl('http://localhost:5051/audiohub')
+        .withUrl(`${process.env.REACT_APP_API_URL || 'http://localhost:8081'}/audiohub`)
         .configureLogging(signalR.LogLevel.Information)
-        .withAutomaticReconnect([0, 1000, 3000, 5000, 10000]) // Strategia di riconnessione robusta
+        .withAutomaticReconnect([0, 1000, 3000, 5000, 10000])
         .build();
       
       // Eventi utente

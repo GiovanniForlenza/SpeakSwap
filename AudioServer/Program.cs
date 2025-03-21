@@ -10,7 +10,11 @@ builder.Services.AddCors(options =>
     options.AddPolicy("CorsPolicy", builder =>
     {
         builder
-            .WithOrigins("http://localhost:3000")
+            .WithOrigins(
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "https://speakswap-client.azurewebsites.net"
+            )
             .AllowAnyMethod()
             .AllowAnyHeader()
             .AllowCredentials();
