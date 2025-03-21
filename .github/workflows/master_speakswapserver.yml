@@ -23,14 +23,14 @@ jobs:
       uses: docker/login-action@v2
       with:
         registry: https://speakswapregistry.azurecr.io/
-        username: ${{ secrets.AzureAppService_ContainerUsername }}
-        password: ${{ secrets.AzureAppService_ContainerPassword }}
+        username: ${{ secrets.AzureAppService_ContainerUsername_000ea4a290e54c318a45800cbf4996ce }}
+        password: ${{ secrets.AzureAppService_ContainerPassword_cfb7bc8f636f4ef99fa8501e09dfdc12 }}
 
     - name: Build and push container image to registry
       uses: docker/build-push-action@v3
       with:
         push: true
-        tags: speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername }}/speakswap_audioserver:${{ github.sha }}
+        tags: speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername_000ea4a290e54c318a45800cbf4996ce }}/speakswapregistry/speakswap_audioserver:${{ github.sha }}
         file: ./Dockerfile
 
   deploy:
@@ -47,5 +47,5 @@ jobs:
       with:
         app-name: 'speakswapserver'
         slot-name: 'production'
-        publish-profile: ${{ secrets.AzureAppService_PublishProfile_f06d236bbb794bf1864413cf17ce1115 }}
-        images: 'speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername }}/speakswap_audioserver:${{ github.sha }}'
+        publish-profile: ${{ secrets.AzureAppService_PublishProfile_2c449cf19f714576aea54ee2a49af612 }}
+        images: 'speakswapregistry.azurecr.io/${{ secrets.AzureAppService_ContainerUsername_000ea4a290e54c318a45800cbf4996ce }}/speakswapregistry/speakswap_audioserver:${{ github.sha }}'
