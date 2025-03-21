@@ -169,9 +169,13 @@ function RoomPage() {
       setMessage('Connessione al server...');
       setDebugInfo(prev => `${prev}\nConnessione a SignalR...`);
       
+      const serverUrl = window.location.hostname === "localhost" 
+        ? "http://localhost:8081" 
+        : "https://speakswapserver-gzf6fpbjb0gma3fb.italynorth-01.azurewebsites.net";    
+        
       // Configura la connessione
       const connection = new signalR.HubConnectionBuilder()
-        .withUrl(`${process.env.REACT_APP_API_URL || 'http://localhost:8081'}/audiohub`)
+        .withUrl(`${serverUrl}/audiohub`)
         .configureLogging(signalR.LogLevel.Information)
         .withAutomaticReconnect([0, 1000, 3000, 5000, 10000])
         .build();
