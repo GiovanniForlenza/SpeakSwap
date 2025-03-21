@@ -13,7 +13,7 @@ builder.Services.AddCors(options =>
             .WithOrigins(
                 "http://localhost:3000",
                 "http://127.0.0.1:3000",
-                "https://speakswap-client.azurewebsites.net"
+                "https://blue-desert-0eae36610.6.azurestaticapps.net"
             )
             .AllowAnyMethod()
             .AllowAnyHeader()
