@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useSignalRConnection } from './SignalRConnectionProvider';
-import { MAX_CHUNK_SIZE, blobToBase64, splitBlobIntoChunks } from './audioUtils';
+import { MAX_CHUNK_SIZE, splitBlobIntoChunks } from './audioUtils';
 
 const AudioRecorder = ({ userName }) => {
   const { connection } = useSignalRConnection();
@@ -24,7 +24,8 @@ const AudioRecorder = ({ userName }) => {
       
       const options = {
         mimeType: 'audio/webm;codecs=opus',
-        audioBitsPerSecond: 32000 // Riduzione della qualità per file più piccoli
+        audioBitsPerSecond: 32000 
+        // audioBitsPerSecond: 128000 
       };
       
       const mediaRecorder = new MediaRecorder(stream, options);
