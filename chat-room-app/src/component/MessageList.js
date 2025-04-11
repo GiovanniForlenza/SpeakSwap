@@ -1,11 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { useSignalRConnection } from './SignalRConnectionProvider';
-import { base64ArrayToBlob } from './audioUtils';
 
 const MessageList = ({ messages }) => {
   const messagesEndRef = useRef(null);
   
-  // Auto-scroll ai nuovi messaggi
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -15,17 +12,53 @@ const MessageList = ({ messages }) => {
   return (
     <div style={{ height: '300px', overflowY: 'scroll', border: '1px solid #ccc', marginBottom: '10px', padding: '10px' }}>
       {messages.map((msg, index) => (
-        <div key={index} style={{ marginBottom: '15px' }}>
-          <div>
-            <span style={{ fontWeight: 'bold' }}>{msg.user}:</span>
-            <span style={{ fontSize: '0.8em', color: '#888', marginLeft: '8px' }}>
-              {msg.time?.toLocaleTimeString()}
-            </span>
-          </div>
+        <div key={index} style={{ 
+          marginBottom: '15px',
+          backgroundColor: msg.type === 'system' ? '#f5f5f5' : 'transparent',
+          padding: msg.type === 'system' ? '5px 10px' : '0',
+          borderRadius: '4px'
+        }}>
+          {msg.type !== 'system' && (
+            <div>
+              <span style={{ fontWeight: 'bold' }}>{msg.user}:</span>
+              <span style={{ fontSize: '0.8em', color: '#888', marginLeft: '8px' }}>
+                {msg.time?.toLocaleTimeString()}
+              </span>
+            </div>
+          )}
           
-          {msg.type === 'text' ? (
+          {msg.type === 'text' && (
             <div>{msg.text}</div>
-          ) : (
+          )}
+          
+          {msg.type === 'system' && (
+            <div style={{ 
+              fontSize: '0.9em', 
+              color: '#666',
+              fontStyle: 'italic',
+              display: 'flex',
+              alignItems: 'center'
+            }}>
+              <span style={{ 
+                display: 'inline-block', 
+                width: '8px', 
+                height: '8px', 
+                backgroundColor: '#2196F3', 
+                borderRadius: '50%', 
+                marginRight: '8px' 
+              }}></span>
+              {msg.text}
+              <span style={{ 
+                fontSize: '0.8em', 
+                color: '#999', 
+                marginLeft: 'auto' 
+              }}>
+                {msg.time?.toLocaleTimeString()}
+              </span>
+            </div>
+          )}
+          
+          {msg.type === 'audio' && (
             <div>
               {msg.isComplete ? (
                 <audio src={msg.audioUrl} controls style={{ marginTop: '5px' }} />
