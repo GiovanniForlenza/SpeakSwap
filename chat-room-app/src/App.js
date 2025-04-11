@@ -5,6 +5,11 @@ import Chat from './components/Chat';
 import { SignalRConnectionProvider } from './components/SignalRConnectionProvider';
 
 function App() {
+  const hubUrl =
+    process.env.NODE_ENV === 'production'
+      ? 'speakswapserver-gzf6fpbjb0gma3fb.italynorth-01.azurewebsites.net/chatHub'
+      : 'http://localhost:5051/chatHub';
+      
   return (
     <Router>
       <div className="app">
@@ -13,7 +18,7 @@ function App() {
           <Route 
             path="/chat" 
             element={
-              <SignalRConnectionProvider hubUrl="http://localhost:5051/chatHub">
+              <SignalRConnectionProvider hubUrl={hubUrl}>
                 <Chat />
               </SignalRConnectionProvider>
             } 
