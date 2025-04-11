@@ -1,8 +1,8 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Login from './component/Login';
-import Chat from './component/Chat';
-import { SignalRConnectionProvider } from './component/SignalRConnectionProvider';
+import Login from './components/Login';
+import Chat from './components/Chat';
+import { SignalRConnectionProvider } from './components/SignalRConnectionProvider';
 
 function App() {
   return (
