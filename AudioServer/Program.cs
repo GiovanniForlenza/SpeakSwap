@@ -81,7 +81,6 @@
 
 // app.Run();
 
-
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
@@ -89,30 +88,43 @@ using Microsoft.Extensions.Configuration;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables();
-builder.Services.AddSignalR().AddAzureSignalR(options =>
+
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true;
+    options.MaximumReceiveMessageSize = 5 * 1024 * 1024;
+})
+.AddAzureSignalR(options =>
 {
     options.ConnectionString = builder.Configuration["Azure:SignalR:ConnectionString"];
+    options.ServerStickyMode = Microsoft.Azure.SignalR.ServerStickyMode.Required;
 });
 
+// Configura CORS con origini multiple, incluso il tuo frontend Azure Static Web App
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("CorsPolicy", builder =>
+    {
         builder
             .WithOrigins(
                 "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "https://blue-desert-0eae36610.6.azurestaticapps.net"
+                "https://blue-desert-0eae36610.6.azurestaticapps.net",
+                "https://*.azurestaticapps.net"
             )
             .AllowAnyMethod()
             .AllowAnyHeader()
-            .AllowCredentials());
+            .AllowCredentials();
+    });
 });
 
 var app = builder.Build();
 
-// Configura la pipeline HTTP
 app.UseCors("CorsPolicy");
+
 app.UseRouting();
-app.MapHub<ChatHub>("/chathub");
+
+app.MapHub<ChatHub>("/chatHub");
+
+app.MapGet("/", () => "Chat server running!");
 
 app.Run();

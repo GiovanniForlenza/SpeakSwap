@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
+import { HttpTransportType, HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { useLocation } from 'react-router-dom';
 
 // Creazione del context per la connessione SignalR
@@ -15,11 +15,16 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
   const queryParams = new URLSearchParams(location.search);
   const userName = queryParams.get("userName");
   const roomName = queryParams.get("roomName");
-
+  
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  
   useEffect(() => {
     // Crea la connessione SignalR
     const newConnection = new HubConnectionBuilder()
-      .withUrl(hubUrl)
+      .withUrl(hubUrl,{
+        skipNegotiation: isLocalhost ? false : true,
+        transport: isLocalhost ? undefined : HttpTransportType.WebSockets
+      })
       .configureLogging(LogLevel.Information)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: retryContext => {
