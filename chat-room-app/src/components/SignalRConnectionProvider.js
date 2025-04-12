@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { HttpTransportType, HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
+import { HubConnectionBuilder, LogLevel, HttpTransportType } from '@microsoft/signalr';
 import { useLocation } from 'react-router-dom';
 
 // Creazione del context per la connessione SignalR
@@ -15,16 +15,24 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
   const queryParams = new URLSearchParams(location.search);
   const userName = queryParams.get("userName");
   const roomName = queryParams.get("roomName");
-  
-  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  
+
   useEffect(() => {
+    // Eseguire solo nel browser, non durante la fase di build
+    if (typeof window === 'undefined') return;
+
+    console.log(`Tentativo di connessione a: ${hubUrl}`);
+    
+    const isLocalhost = typeof window !== 'undefined' && 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    
+      const connectionOptions = isLocalhost ? {} : {
+      skipNegotiation: true,
+      transport: HttpTransportType.WebSockets
+    };
+
     // Crea la connessione SignalR
     const newConnection = new HubConnectionBuilder()
-      .withUrl(hubUrl,{
-        skipNegotiation: isLocalhost ? false : true,
-        transport: isLocalhost ? undefined : HttpTransportType.WebSockets
-      })
+      .withUrl(hubUrl, connectionOptions)
       .configureLogging(LogLevel.Information)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: retryContext => {
@@ -38,7 +46,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
 
     setConnection(newConnection);
 
-    // Evento per la riconnessione
+    // Eventi di connessione
     newConnection.onreconnecting(error => {
       console.warn('Riconnessione in corso...', error);
       setConnectionStatus('Reconnecting');
@@ -59,7 +67,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
       setConnectionStatus('Disconnected');
     });
     
-    // Gestione degli eventi relativi alle stanze
+    // Eventi stanza
     newConnection.on('UserJoined', (user) => {
       console.log(`Utente ${user} si è unito alla stanza`);
       setRoomUsers(prevUsers => {
@@ -80,23 +88,29 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
       setRoomUsers(users);
     });
 
-    // Connessione al server
-    newConnection.start()
-      .then(() => {
-        console.log('Connessione stabilita');
+    // Tentativo di connessione
+    const startConnection = async () => {
+      try {
+        await newConnection.start();
+        console.log('Connessione stabilita!');
         setConnectionStatus('Connected');
         
-        // Dopo la connessione, entra nella stanza se userName e roomName sono disponibili
+        // Dopo la connessione, entra nella stanza
         if (userName && roomName) {
-          joinRoom(newConnection, userName, roomName);
+          await joinRoom(newConnection, userName, roomName);
         }
-      })
-      .catch(err => {
+      } catch (err) {
         console.error('Errore di connessione:', err);
         setConnectionStatus('Error');
-      });
+        
+        // Riprova dopo un ritardo
+        setTimeout(startConnection, 5000);
+      }
+    };
 
-    // Pulizia alla disconnessione
+    startConnection();
+
+    // Pulizia
     return () => {
       if (newConnection) {
         newConnection.stop();
@@ -108,14 +122,14 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
   const joinRoom = async (conn, user, room) => {
     try {
       console.log(`Entrando nella stanza ${room} come ${user}...`);
-      await conn.invoke('JoinRoom', user, room, 'it'); // Aggiunto 'it' come lingua predefinita
+      await conn.invoke('JoinRoom', user, room, 'it');
       console.log(`Entrato nella stanza ${room}`);
     } catch (err) {
       console.error(`Errore nell'entrare nella stanza ${room}:`, err);
     }
   };
 
-  // Espone connessione e stato attraverso il context
+  // Context value
   const contextValue = {
     connection,
     connectionStatus,
