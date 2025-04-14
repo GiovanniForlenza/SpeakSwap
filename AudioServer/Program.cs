@@ -115,7 +115,7 @@ builder.Services.AddCors(options =>
     {
         builder
             .WithOrigins(
-                // "http://localhost:3000",
+                "http://localhost:3000",
                 "https://blue-desert-0eae36610.6.azurestaticapps.net"
             )
             .AllowAnyMethod()
