@@ -22,17 +22,20 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
 
     console.log(`Tentativo di connessione a: ${hubUrl}`);
     
-    const isLocalhost = typeof window !== 'undefined' && 
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    // const isLocalhost = typeof window !== 'undefined' && 
+    //   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
     
-      const connectionOptions = isLocalhost ? {} : {
-      skipNegotiation: true,
-      transport: HttpTransportType.WebSockets
-    };
+    //   const connectionOptions = isLocalhost ? {} : {
+    //   skipNegotiation: true,
+    //   transport: HttpTransportType.WebSockets
+    // };
 
     // Crea la connessione SignalR
     const newConnection = new HubConnectionBuilder()
-      .withUrl(hubUrl, connectionOptions)
+      .withUrl('https://speakswapserver-gzf6fpbjb0gma3fb.italynorth-01.azurewebsites.net/chatHub', {
+          skipNegotiation: true,
+          transport: HttpTransportType.WebSockets
+      })
       .configureLogging(LogLevel.Information)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: retryContext => {
@@ -110,23 +113,23 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
 
     startConnection();
 
-    let pingInterval = null;
-    if (!isLocalhost) {
-      pingInterval = setInterval(() => {
-        if (newConnection && newConnection.state === 'Connected') {
-          newConnection.invoke('Ping').catch(err => {
-            console.warn('Errore durante il ping keep-alive:', err);
-          });
-        }
-      }, 15000); // Ping ogni 15 secondi
-    }
+    // let pingInterval = null;
+    // if (!isLocalhost) {
+    //   pingInterval = setInterval(() => {
+    //     if (newConnection && newConnection.state === 'Connected') {
+    //       newConnection.invoke('Ping').catch(err => {
+    //         console.warn('Errore durante il ping keep-alive:', err);
+    //       });
+    //     }
+    //   }, 15000); // Ping ogni 15 secondi
+    // }
 
 
     // Pulizia
     return () => {
-      if(pingInterval) {
-        clearInterval(pingInterval);
-      }
+      // if(pingInterval) {
+      //   clearInterval(pingInterval);
+      // }
       if (newConnection) {
         newConnection.stop();
       }
