@@ -90,21 +90,25 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables();
 
+builder.Logging.AddConsole();
+builder.Logging.SetMinimumLevel(LogLevel.Information);
+
 builder.Services.AddSignalR(options =>
 {
     options.EnableDetailedErrors = true;
-    options.MaximumReceiveMessageSize = 5 * 1024 * 1024;
+    options.MaximumReceiveMessageSize = 5 * 1024 * 1024; // 5MB
+    options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
 })
 .AddAzureSignalR(options =>
 {
     options.ConnectionString = builder.Configuration["Azure:SignalR:ConnectionString"];
     options.ServerStickyMode = ServerStickyMode.Required;
-    // options.ServerStickyMode = Microsoft.Azure.SignalR.ServerStickyMode.Required;
+    // options.ConnectionCount = 5; // Aumenta le connessioni
     options.GracefulShutdown.Mode = GracefulShutdownMode.WaitForClientsClose;
     options.GracefulShutdown.Timeout = TimeSpan.FromSeconds(30);
 });
 
-// Configura CORS con origini multiple, incluso il tuo frontend Azure Static Web App
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("CorsPolicy", builder =>
@@ -127,8 +131,18 @@ app.UseCors("CorsPolicy");
 
 app.UseRouting();
 
-app.MapHub<ChatHub>("/chatHub");
-
 app.MapGet("/", () => "Chat server running!");
+
+app.MapGet("/healthcheck", () =>
+{
+    return new
+    {
+        Status = "Healthy",
+        Timestamp = DateTime.UtcNow,
+        Version = "1.0.0"
+    };
+});
+
+app.MapHub<ChatHub>("/chatHub");
 
 app.Run();
