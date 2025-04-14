@@ -1,8 +1,7 @@
 FROM mcr.microsoft.com/dotnet/aspnet:6.0 AS base
 WORKDIR /app
 EXPOSE 8081
-# EXPOSE 80
-# EXPOSE 443
+ENV ASPNETCORE_URLS=http://0.0.0.0:8081
 
 # Installa le librerie audio necessarie
 RUN apt-get update && apt-get install -y \
@@ -27,11 +26,5 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENV ASPNETCORE_ENVIRONMENT=Production
-
-ENV ASPNETCORE_URLS=http://0.0.0.0:8081
-
-# Aumenta i timeout di SignalR
-ENV Azure__SignalR__ConnectionCount=5
-ENV Azure__SignalR__ServerStickyMode=Required
-ENV Azure__SignalR__MaximumConnectionLifetime=3600
+ENV WEBSITES_PORT=8081
 ENTRYPOINT ["dotnet", "AudioServer.dll"]
