@@ -11,6 +11,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
   const [connection, setConnection] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [roomUsers, setRoomUsers] = useState([]);
+  const [reconnectCount, setReconnectCount] = useState(0);
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const userName = queryParams.get("userName");
@@ -22,25 +23,25 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
 
     console.log(`Tentativo di connessione a: ${hubUrl}`);
     
-    // const isLocalhost = typeof window !== 'undefined' && 
-    //   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-    
-    //   const connectionOptions = isLocalhost ? {} : {
-    //   skipNegotiation: true,
-    //   transport: HttpTransportType.WebSockets
-    // };
-
-    // Crea la connessione SignalR
+    // Crea la connessione SignalR con configurazione ottimizzata per Azure
     const newConnection = new HubConnectionBuilder()
       .withUrl('https://speakswapserver-gzf6fpbjb0gma3fb.italynorth-01.azurewebsites.net/chatHub', {
           skipNegotiation: true,
-          transport: HttpTransportType.WebSockets
+          transport: HttpTransportType.WebSockets,
+          serverTimeoutInMilliseconds: 100000, // 100 secondi di timeout
+          keepAliveIntervalInMilliseconds: 15000 // 15 secondi di keep-alive
       })
       .configureLogging(LogLevel.Information)
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: retryContext => {
+          // Incrementa il contatore di riconnessioni
+          setReconnectCount(prev => prev + 1);
+          
+          // Strategia di retry con backoff esponenziale
           if (retryContext.previousRetryCount < 10) {
-            return Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 30000);
+            const delayMs = Math.min(1000 * Math.pow(1.5, retryContext.previousRetryCount), 30000);
+            console.log(`Tentativo di riconnessione ${retryContext.previousRetryCount + 1} tra ${delayMs}ms`);
+            return delayMs;
           }
           return null;
         }
@@ -58,6 +59,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
     newConnection.onreconnected(connectionId => {
       console.log('Riconnesso con ID:', connectionId);
       setConnectionStatus('Connected');
+      setReconnectCount(0); // Reset del contatore dopo riconnessione
       
       // Quando riconnesso, rientra automaticamente nella stanza
       if (userName && roomName) {
@@ -97,6 +99,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
         await newConnection.start();
         console.log('Connessione stabilita!');
         setConnectionStatus('Connected');
+        setReconnectCount(0); // Reset del contatore dopo connessione
         
         // Dopo la connessione, entra nella stanza
         if (userName && roomName) {
@@ -113,23 +116,21 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
 
     startConnection();
 
-    // let pingInterval = null;
-    // if (!isLocalhost) {
-    //   pingInterval = setInterval(() => {
-    //     if (newConnection && newConnection.state === 'Connected') {
-    //       newConnection.invoke('Ping').catch(err => {
-    //         console.warn('Errore durante il ping keep-alive:', err);
-    //       });
-    //     }
-    //   }, 15000); // Ping ogni 15 secondi
-    // }
+    // Imposta un ping periodico per mantenere attiva la connessione
+    const pingInterval = setInterval(() => {
+      if (newConnection && newConnection.state === "Connected") {
+        newConnection.invoke("Ping").then(
+          result => console.log("Keep-alive ping: ", result),
+          err => console.warn("Errore durante il ping keep-alive:", err)
+        );
+      }
+    }, 15000); // Ping ogni 15 secondi
 
-
-    // Pulizia
+    // Pulizia alla disconnessione
     return () => {
-      // if(pingInterval) {
-      //   clearInterval(pingInterval);
-      // }
+      if (pingInterval) {
+        clearInterval(pingInterval);
+      }
       if (newConnection) {
         newConnection.stop();
       }
@@ -144,6 +145,13 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
       console.log(`Entrato nella stanza ${room}`);
     } catch (err) {
       console.error(`Errore nell'entrare nella stanza ${room}:`, err);
+      
+      // Ritenta dopo un breve ritardo
+      setTimeout(() => {
+        if (conn.state === 'Connected') {
+          joinRoom(conn, user, room);
+        }
+      }, 2000);
     }
   };
 
@@ -152,7 +160,8 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
     connection,
     connectionStatus,
     roomUsers,
-    roomName
+    roomName,
+    reconnectCount
   };
 
   return (
