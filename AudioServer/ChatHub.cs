@@ -139,6 +139,12 @@ public class ChatHub : Hub
         }
     }
 
+    public string Ping()
+    {
+        _logger.LogInformation($"Ping chiamato da ConnectionId {Context.ConnectionId}");
+        return "Pong";
+    }
+
     // Classe per memorizzare le connessioni
     public class UserConnection
     {

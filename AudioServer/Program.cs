@@ -84,6 +84,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Azure.SignalR;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -97,7 +98,10 @@ builder.Services.AddSignalR(options =>
 .AddAzureSignalR(options =>
 {
     options.ConnectionString = builder.Configuration["Azure:SignalR:ConnectionString"];
-    options.ServerStickyMode = Microsoft.Azure.SignalR.ServerStickyMode.Required;
+    options.ServerStickyMode = ServerStickyMode.Required;
+    // options.ServerStickyMode = Microsoft.Azure.SignalR.ServerStickyMode.Required;
+    options.GracefulShutdown.Mode = GracefulShutdownMode.WaitForClientsClose;
+    options.GracefulShutdown.Timeout = TimeSpan.FromSeconds(30);
 });
 
 // Configura CORS con origini multiple, incluso il tuo frontend Azure Static Web App
