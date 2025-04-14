@@ -1,8 +1,8 @@
 FROM mcr.microsoft.com/dotnet/aspnet:6.0 AS base
 WORKDIR /app
 EXPOSE 8081
-EXPOSE 80
-EXPOSE 443
+# EXPOSE 80
+# EXPOSE 443
 
 # Installa le librerie audio necessarie
 RUN apt-get update && apt-get install -y \
