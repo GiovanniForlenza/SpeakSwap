@@ -110,8 +110,23 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
 
     startConnection();
 
+    let pingInterval = null;
+    if (!isLocalhost) {
+      pingInterval = setInterval(() => {
+        if (newConnection && newConnection.state === 'Connected') {
+          newConnection.invoke('Ping').catch(err => {
+            console.warn('Errore durante il ping keep-alive:', err);
+          });
+        }
+      }, 15000); // Ping ogni 15 secondi
+    }
+
+
     // Pulizia
     return () => {
+      if(pingInterval) {
+        clearInterval(pingInterval);
+      }
       if (newConnection) {
         newConnection.stop();
       }
