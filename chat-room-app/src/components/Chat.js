@@ -157,7 +157,7 @@ const Chat = () => {
         }
       });
     };
-  // Rimuovi messages dalla dipendenza per evitare reregistrazioni multiple
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, userName, addLog]);
 
   // Effetto per monitorare i cambiamenti nell'array dei messaggi

@@ -108,7 +108,7 @@ builder.Services.AddSignalR(options =>
 
     options.ServerStickyMode = ServerStickyMode.Preferred;
 
-    options.ConnectionCount = 5;
+    options.InitialHubServerConnectionCount = 5;
 
     options.GracefulShutdown.Mode = GracefulShutdownMode.WaitForClientsClose;
     options.GracefulShutdown.Timeout = TimeSpan.FromSeconds(30);
