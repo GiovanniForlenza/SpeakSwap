@@ -85,6 +85,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Azure.SignalR;
+using System;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -93,6 +94,7 @@ builder.Configuration.AddEnvironmentVariables();
 builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
+// Configura SignalR con impostazioni specifiche per Azure SignalR Service
 builder.Services.AddSignalR(options =>
 {
     options.EnableDetailedErrors = true;
@@ -103,12 +105,16 @@ builder.Services.AddSignalR(options =>
 .AddAzureSignalR(options =>
 {
     options.ConnectionString = builder.Configuration["Azure:SignalR:ConnectionString"];
-    options.ServerStickyMode = ServerStickyMode.Required;
-    // options.ConnectionCount = 5; // Aumenta le connessioni
+
+    options.ServerStickyMode = ServerStickyMode.Preferred;
+
+    options.ConnectionCount = 5;
+
     options.GracefulShutdown.Mode = GracefulShutdownMode.WaitForClientsClose;
     options.GracefulShutdown.Timeout = TimeSpan.FromSeconds(30);
 });
 
+// Configura CORS con le origini corrette
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("CorsPolicy", builder =>

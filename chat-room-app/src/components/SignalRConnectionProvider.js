@@ -1,8 +1,7 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
 import { HubConnectionBuilder, LogLevel, HttpTransportType } from '@microsoft/signalr';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
-// Creazione del context per la connessione SignalR
 const SignalRContext = createContext(null);
 
 export const useSignalRConnection = () => useContext(SignalRContext);
@@ -13,147 +12,217 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
   const [roomUsers, setRoomUsers] = useState([]);
   const [reconnectCount, setReconnectCount] = useState(0);
   const location = useLocation();
+  const navigate = useNavigate();
   const queryParams = new URLSearchParams(location.search);
   const userName = queryParams.get("userName");
   const roomName = queryParams.get("roomName");
+
+  const joinRoom = useCallback(async (conn, user, room) => {
+    if (!conn || conn.state !== 'Connected') {
+      console.error("Impossibile entrare nella stanza: connessione non attiva");
+      return false;
+    }
+    
+    try {
+      const trimmedUser = user?.trim();
+      const trimmedRoom = room?.trim();
+      
+      if (!trimmedUser || !trimmedRoom) {
+        console.error("Nome utente o stanza non validi");
+        return false;
+      }
+      
+      console.log(`Entrando nella stanza ${room} come ${user}...`);
+      await conn.invoke('JoinRoom', user, room, 'it');
+      console.log(`Entrato nella stanza ${room}`);
+      return true;
+    } catch (err) {
+      console.error(`Errore nell'entrare nella stanza ${room}:`, err);
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     // Eseguire solo nel browser, non durante la fase di build
     if (typeof window === 'undefined') return;
 
-    console.log(`Tentativo di connessione a: ${hubUrl}`);
-    
-    // Crea la connessione SignalR con configurazione ottimizzata per Azure
-    const newConnection = new HubConnectionBuilder()
-      .withUrl('https://speakswapserver-gzf6fpbjb0gma3fb.italynorth-01.azurewebsites.net/chatHub', {
-          skipNegotiation: true,
-          transport: HttpTransportType.WebSockets,
-          serverTimeoutInMilliseconds: 100000, // 100 secondi di timeout
-          keepAliveIntervalInMilliseconds: 15000 // 15 secondi di keep-alive
-      })
-      .configureLogging(LogLevel.Information)
-      .withAutomaticReconnect({
-        nextRetryDelayInMilliseconds: retryContext => {
-          // Incrementa il contatore di riconnessioni
-          setReconnectCount(prev => prev + 1);
-          
-          // Strategia di retry con backoff esponenziale
-          if (retryContext.previousRetryCount < 10) {
-            const delayMs = Math.min(1000 * Math.pow(1.5, retryContext.previousRetryCount), 30000);
-            console.log(`Tentativo di riconnessione ${retryContext.previousRetryCount + 1} tra ${delayMs}ms`);
-            return delayMs;
-          }
-          return null;
-        }
-      })
-      .build();
-
-    setConnection(newConnection);
-
-    // Eventi di connessione
-    newConnection.onreconnecting(error => {
-      console.warn('Riconnessione in corso...', error);
-      setConnectionStatus('Reconnecting');
-    });
-
-    newConnection.onreconnected(connectionId => {
-      console.log('Riconnesso con ID:', connectionId);
-      setConnectionStatus('Connected');
-      setReconnectCount(0); // Reset del contatore dopo riconnessione
-      
-      // Quando riconnesso, rientra automaticamente nella stanza
-      if (userName && roomName) {
-        joinRoom(newConnection, userName, roomName);
-      }
-    });
-    
-    newConnection.onclose(error => {
-      console.error('Connessione chiusa:', error);
-      setConnectionStatus('Disconnected');
-    });
-    
-    // Eventi stanza
-    newConnection.on('UserJoined', (user) => {
-      console.log(`Utente ${user} si è unito alla stanza`);
-      setRoomUsers(prevUsers => {
-        if (!prevUsers.includes(user)) {
-          return [...prevUsers, user];
-        }
-        return prevUsers;
+    // Salva log per il debugging
+    const addLog = (message, type = 'info') => {
+      console.log(`[SignalR ${type}] ${message}`);
+      const logs = JSON.parse(localStorage.getItem('signalRLogs') || '[]');
+      logs.push({
+        time: new Date().toISOString(),
+        message,
+        type
       });
-    });
+      if (logs.length > 100) logs.shift();
+      localStorage.setItem('signalRLogs', JSON.stringify(logs));
+    };
 
-    newConnection.on('UserLeft', (user) => {
-      console.log(`Utente ${user} ha lasciato la stanza`);
-      setRoomUsers(prevUsers => prevUsers.filter(u => u !== user));
-    });
+    let hubConnection = null;
+    let pingInterval = null;
+    
+    // Funzione separata per creare la connessione
+    const createConnection = () => {
+      addLog(`Creazione nuova connessione a: ${hubUrl}`);
+      
+      return new HubConnectionBuilder()
+        .withUrl(hubUrl, {
+            skipNegotiation: false, // Cambiato: consenti negoziazione per Azure SignalR
+            transport: HttpTransportType.WebSockets,
+            serverTimeoutInMilliseconds: 100000, // 100 secondi di timeout
+            keepAliveIntervalInMilliseconds: 15000 // 15 secondi di keep-alive
+        })
+        .configureLogging(LogLevel.Information)
+        .withAutomaticReconnect({
+          nextRetryDelayInMilliseconds: retryContext => {
+            // Incrementa il contatore di tentativi
+            setReconnectCount(prev => prev + 1);
+            
+            if (retryContext.previousRetryCount < 10) {
+              const delayMs = Math.min(1000 * Math.pow(1.5, retryContext.previousRetryCount), 30000);
+              addLog(`Tentativo di riconnessione ${retryContext.previousRetryCount + 1} tra ${delayMs}ms`);
+              return delayMs;
+            }
+            return null;
+          }
+        })
+        .build();
+    };
 
-    newConnection.on('UsersInRoom', (users) => {
-      console.log('Utenti nella stanza:', users);
-      setRoomUsers(users);
-    });
-
-    // Tentativo di connessione
+    // Funzione per avviare la connessione
     const startConnection = async () => {
       try {
-        await newConnection.start();
-        console.log('Connessione stabilita!');
+        if (hubConnection && hubConnection.state === "Connected") {
+          addLog("Connessione già attiva");
+          return;
+        }
+
+        if (!hubConnection) {
+          hubConnection = createConnection();
+          
+          // Eventi di connessione
+          hubConnection.onreconnecting(error => {
+            addLog(`Riconnessione in corso: ${error?.message || 'Errore sconosciuto'}`, 'warn');
+            setConnectionStatus('Reconnecting');
+          });
+
+          hubConnection.onreconnected(connectionId => {
+            addLog(`Riconnesso con ID: ${connectionId || 'ID non disponibile'}`);
+            setConnectionStatus('Connected');
+            setReconnectCount(0); // Reset del contatore di riconnessioni
+            
+            // Quando riconnesso, rientra automaticamente nella stanza
+            if (userName && roomName) {
+              joinRoom(hubConnection, userName, roomName);
+            }
+          });
+          
+          hubConnection.onclose(error => {
+            addLog(`Connessione chiusa: ${error?.message || 'Nessun errore specificato'}`, 'error');
+            setConnectionStatus('Disconnected');
+          });
+          
+          // Eventi stanza
+          hubConnection.on('JoinedRoom', (roomJoined) => {
+            addLog(`Sei entrato nella stanza: ${roomJoined}`);
+          });
+          
+          hubConnection.on('UserJoined', (user) => {
+            addLog(`Utente ${user} si è unito alla stanza`);
+            setRoomUsers(prevUsers => {
+              if (!prevUsers.includes(user)) {
+                return [...prevUsers, user];
+              }
+              return prevUsers;
+            });
+          });
+
+          hubConnection.on('UserLeft', (user) => {
+            addLog(`Utente ${user} ha lasciato la stanza`);
+            setRoomUsers(prevUsers => prevUsers.filter(u => u !== user));
+          });
+
+          hubConnection.on('UsersInRoom', (users) => {
+            addLog(`Utenti nella stanza: ${users.join(', ')}`);
+            setRoomUsers(users);
+          });
+          
+          hubConnection.on('Reconnect', () => {
+            addLog('Il server ha richiesto una riconnessione', 'warn');
+            
+            // Riavvia la connessione
+            hubConnection.stop().then(() => {
+              setTimeout(() => {
+                startConnection();
+              }, 1000);
+            });
+          });
+        }
+
+        addLog('Avvio connessione...');
+        await hubConnection.start();
+        addLog('Connessione stabilita!');
         setConnectionStatus('Connected');
-        setReconnectCount(0); // Reset del contatore dopo connessione
+        setReconnectCount(0);
+        setConnection(hubConnection);
         
         // Dopo la connessione, entra nella stanza
         if (userName && roomName) {
-          await joinRoom(newConnection, userName, roomName);
+          const joined = await joinRoom(hubConnection, userName, roomName);
+          if (!joined) {
+            addLog('Impossibile entrare nella stanza, riprovo...', 'warn');
+            setTimeout(() => joinRoom(hubConnection, userName, roomName), 2000);
+          }
         }
       } catch (err) {
-        console.error('Errore di connessione:', err);
+        addLog(`Errore di connessione: ${err.message}`, 'error');
         setConnectionStatus('Error');
         
         // Riprova dopo un ritardo
+        addLog('Riprovo la connessione tra 5 secondi...');
         setTimeout(startConnection, 5000);
       }
     };
 
+    // Avvia la connessione
     startConnection();
 
-    // Imposta un ping periodico per mantenere attiva la connessione
-    const pingInterval = setInterval(() => {
-      if (newConnection && newConnection.state === "Connected") {
-        newConnection.invoke("Ping").then(
-          result => console.log("Keep-alive ping: ", result),
-          err => console.warn("Errore durante il ping keep-alive:", err)
-        );
+    // Imposta il ping periodico
+    pingInterval = setInterval(() => {
+      if (hubConnection && hubConnection.state === 'Connected') {
+        addLog('Invio ping keep-alive...', 'debug');
+        hubConnection.invoke('Ping')
+          .then(response => addLog(`Risposta ping: ${response}`, 'debug'))
+          .catch(err => {
+            addLog(`Errore ping keep-alive: ${err.message}`, 'warn');
+            
+            // Se il ping fallisce, potrebbe essere un problema di connessione
+            if (hubConnection.state !== 'Connected') {
+              hubConnection.stop().then(() => {
+                addLog('Riavvio connessione dopo ping fallito');
+                setTimeout(startConnection, 1000);
+              });
+            }
+          });
+      } else {
+        addLog(`Skip ping: stato connessione = ${hubConnection?.state}`, 'debug');
       }
-    }, 15000); // Ping ogni 15 secondi
+    }, 20000); // Ping ogni 20 secondi
 
-    // Pulizia alla disconnessione
+    // Pulizia
     return () => {
+      addLog('Cleanup provider SignalR');
       if (pingInterval) {
         clearInterval(pingInterval);
+        addLog('Intervallo ping fermato');
       }
-      if (newConnection) {
-        newConnection.stop();
+      if (hubConnection) {
+        hubConnection.stop();
+        addLog('Connessione fermata');
       }
     };
-  }, [hubUrl, userName, roomName]);
-
-  // Funzione per entrare in una stanza
-  const joinRoom = async (conn, user, room) => {
-    try {
-      console.log(`Entrando nella stanza ${room} come ${user}...`);
-      await conn.invoke('JoinRoom', user, room, 'it');
-      console.log(`Entrato nella stanza ${room}`);
-    } catch (err) {
-      console.error(`Errore nell'entrare nella stanza ${room}:`, err);
-      
-      // Ritenta dopo un breve ritardo
-      setTimeout(() => {
-        if (conn.state === 'Connected') {
-          joinRoom(conn, user, room);
-        }
-      }, 2000);
-    }
-  };
+  }, [hubUrl, userName, roomName, joinRoom, navigate]);
 
   // Context value
   const contextValue = {

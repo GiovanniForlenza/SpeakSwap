@@ -29,14 +29,13 @@ public class ChatHub : Hub
             // Memorizza le informazioni utente
             var userConnection = new UserConnection
             {
-                UserName = userName,
-                RoomName = roomName,
+                UserName = userName.Trim(),
+                RoomName = roomName.Trim(),
                 Language = language
             };
 
             _connections[connectionId] = userConnection;
 
-            // Aggiungi l'utente alla stanza nel dizionario delle stanze (ora memorizza connectionId invece di true)
             _rooms.AddOrUpdate(
                 roomName,
                 (key) => new ConcurrentDictionary<string, string>(new[] { new KeyValuePair<string, string>(userName, connectionId) }),
@@ -49,34 +48,26 @@ public class ChatHub : Hub
 
             try
             {
+                // Prima aggiungi al gruppo
                 await Groups.AddToGroupAsync(connectionId, roomName);
                 _logger.LogInformation($"Utente {userName} aggiunto al gruppo {roomName}");
+
+                // Invia messaggio di conferma al chiamante
+                await Clients.Caller.SendAsync("JoinedRoom", roomName);
+
+                // Poi notifica altri utenti
+                await Clients.OthersInGroup(roomName).SendAsync("UserJoined", userName);
+
+                // Infine, invia la lista utenti al nuovo membro
+                var usersInRoom = _rooms[roomName].Keys.ToList();
+                await Clients.Caller.SendAsync("UsersInRoom", usersInRoom);
+
+                _logger.LogInformation($"Utente {userName} si è unito alla stanza {roomName} con successo. Utenti nella stanza: {string.Join(", ", usersInRoom)}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Errore nell'aggiungere l'utente {userName} al gruppo {roomName}, continuiamo comunque");
+                _logger.LogError(ex, $"Errore nell'aggiungere l'utente {userName} al gruppo {roomName}");
             }
-
-            var usersInRoom = _rooms[roomName];
-            foreach (var user in usersInRoom)
-            {
-                if (user.Key != userName)
-                {
-                    try
-                    {
-                        await Clients.Client(user.Value).SendAsync("UserJoined", userName);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, $"Errore nell'inviare UserJoined a {user.Key} ({user.Value})");
-                    }
-                }
-            }
-
-            var userList = usersInRoom.Keys.ToList();
-            await Clients.Caller.SendAsync("UsersInRoom", userList);
-
-            _logger.LogInformation($"Utente {userName} si è unito alla stanza {roomName} con successo. Utenti nella stanza: {string.Join(", ", userList)}");
         }
         catch (Exception ex)
         {
@@ -159,36 +150,64 @@ public class ChatHub : Hub
                 var roomName = userConnection.RoomName;
                 _logger.LogInformation($"Messaggio da {userName} nella stanza {roomName}: {message}");
 
-                // Prima tenta di inviare il messaggio usando i gruppi 
+                // Approccio 1: Invia a tutti nel gruppo, incluso il mittente
                 try
                 {
                     await Clients.Group(roomName).SendAsync("ReceiveMessage", userName, message);
                     _logger.LogInformation($"Messaggio inviato al gruppo {roomName}");
+                    return;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, $"Errore nell'inviare messaggio al gruppo {roomName}, fallback all'invio diretto");
+                    _logger.LogError(ex, $"Errore nell'inviare messaggio al gruppo {roomName}, tentativo alternativo...");
+                }
 
-                    // Fallback: invia messaggio direttamente a tutti gli utenti nella stanza
-                    if (_rooms.TryGetValue(roomName, out var users))
+                // Approccio 2: Prova con OthersInGroup + Caller
+                try
+                {
+                    // Invia agli altri nella stanza
+                    await Clients.OthersInGroup(roomName).SendAsync("ReceiveMessage", userName, message);
+
+                    // Invia anche al mittente per conferma
+                    await Clients.Caller.SendAsync("ReceiveMessage", userName, message);
+
+                    _logger.LogInformation($"Messaggio inviato separatamente a OthersInGroup + Caller");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"Errore nel secondo approccio, fallback all'invio diretto");
+                }
+
+                // Fallback: invia messaggio direttamente a tutti gli utenti nella stanza
+                if (_rooms.TryGetValue(roomName, out var users))
+                {
+                    foreach (var user in users)
                     {
-                        foreach (var user in users)
+                        try
                         {
-                            try
+                            if (user.Value != connectionId)
                             {
                                 await Clients.Client(user.Value).SendAsync("ReceiveMessage", userName, message);
                             }
-                            catch (Exception innerEx)
-                            {
-                                _logger.LogError(innerEx, $"Errore nell'inviare messaggio diretto a {user.Key} ({user.Value})");
-                            }
+                        }
+                        catch (Exception innerEx)
+                        {
+                            _logger.LogError(innerEx, $"Errore nell'inviare messaggio diretto a {user.Key} ({user.Value})");
                         }
                     }
+
+                    // Conferma al mittente
+                    await Clients.Caller.SendAsync("ReceiveMessage", userName, message);
+                    _logger.LogInformation("Messaggio inviato con metodo fallback diretto");
                 }
             }
             else
             {
                 _logger.LogWarning($"SendMessage: Utente {userName} non trovato nelle connessioni");
+
+                // Riconnetti l'utente se possibile
+                await Clients.Caller.SendAsync("Reconnect");
             }
         }
         catch (Exception ex)

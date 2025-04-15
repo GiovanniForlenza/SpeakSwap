@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSignalRConnection } from './SignalRConnectionProvider';
 import { base64ArrayToBlob } from './audioUtils';
 import { useLocation } from 'react-router-dom';
@@ -17,33 +17,48 @@ const Chat = () => {
   const [messages, setMessages] = useState([]);
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
-  const userName = queryParams.get("userName");
+  const userName = queryParams.get("userName")?.trim();
+
+  // Funzione per salvare log nel localStorage per debugging
+  const addLog = useCallback((message, type = 'info') => {
+    console.log(`[Chat ${type}] ${message}`);
+    const logs = JSON.parse(localStorage.getItem('chatLogs') || '[]');
+    logs.push({
+      time: new Date().toISOString(),
+      message,
+      type
+    });
+    if (logs.length > 100) logs.shift();
+    localStorage.setItem('chatLogs', JSON.stringify(logs));
+  }, []);
 
   useEffect(() => {
     if (!connection) {
-      console.log("No SignalR connection available yet");
+      addLog("No SignalR connection available yet", "warn");
       return;
     }
 
-    console.log("Setting up SignalR event handlers");
+    addLog("Setting up SignalR event handlers");
 
-    // registra il gestore per ricevere i messaggi di testo
+    // Registra il gestore per ricevere i messaggi di testo
     connection.on('ReceiveMessage', (user, receivedMessage) => {
-      setMessages(prevMessages => [...prevMessages, { 
-        user, 
-        text: receivedMessage, 
-        time: new Date(),
-        type: 'text'
-      }]);
+      addLog(`Messaggio ricevuto da ${user}: ${receivedMessage}`);
+      setMessages(prevMessages => {
+        const newMessages = [...prevMessages, { 
+          user, 
+          text: receivedMessage, 
+          time: new Date(),
+          type: 'text'
+        }];
+        addLog(`Nuova lunghezza messaggi: ${newMessages.length}`);
+        return newMessages;
+      });
     });
 
-    // registra il gestore per ricevere i chunk audio
+    // Registra il gestore per ricevere i chunk audio
     connection.on('ReceiveAudioChunk', (user, chunkBase64, chunkId, isLastChunk, totalChunks) => {
-      console.log(`Received audio chunk ${chunkId}/${totalChunks} from ${user}`);
+      addLog(`Ricevuto chunk audio ${chunkId}/${totalChunks} da ${user}`);
       
-      // Controlla se il messaggio audio è il primo chunk
-      // Se è il primo chunk, crea un nuovo messaggio audio
-      // Se è l'ultimo chunk, crea un messaggio audio completo
       if (chunkId === 0) {
         setMessages(prevMessages => [...prevMessages, { 
           user, 
@@ -56,25 +71,25 @@ const Chat = () => {
           id: Date.now() 
         }]);
       } else {
-        // aggiungi il chunk audio al messaggio esistente
         setMessages(prevMessages => {
-          // trova l'ultimo messaggio audio dell'utente
           const audioMessages = prevMessages.filter(m => 
             m.type === 'audio' && m.user === user && !m.isComplete);
           
-          if (audioMessages.length === 0) return prevMessages;
+          if (audioMessages.length === 0) {
+            addLog(`Nessun messaggio audio incompiuto trovato per ${user}`, "warn");
+            return prevMessages;
+          }
           
           const lastAudioMessage = audioMessages[audioMessages.length - 1];
           
-          // aggiorna il messaggio audio esistente con il nuovo chunk
           return prevMessages.map(msg => {
             if (msg === lastAudioMessage) {
               const newAudioChunks = [...msg.audioChunks, chunkBase64];
               const isComplete = isLastChunk || newAudioChunks.length === msg.totalChunks;
               
-              // se il messaggio è completo e non ha ancora un URL audio lo crea
               let audioUrl = msg.audioUrl;
               if (isComplete && !msg.audioUrl) {
+                addLog(`Creazione blob audio per messaggio di ${user}`, "debug");
                 const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/webm');
                 audioUrl = URL.createObjectURL(audioBlob);
               }
@@ -96,6 +111,7 @@ const Chat = () => {
     // Aggiunge un messaggio di sistema quando un utente entra o esce
     connection.on('UserJoined', (user) => {
       if (user !== userName) {
+        addLog(`Utente ${user} è entrato nella stanza`);
         setMessages(prevMessages => [...prevMessages, {
           user: 'System',
           text: `${user} è entrato nella stanza`,
@@ -106,6 +122,7 @@ const Chat = () => {
     });
 
     connection.on('UserLeft', (user) => {
+      addLog(`Utente ${user} ha lasciato la stanza`);
       setMessages(prevMessages => [...prevMessages, {
         user: 'System',
         text: `${user} ha lasciato la stanza`,
@@ -114,8 +131,20 @@ const Chat = () => {
       }]);
     });
 
+    // Debug: aggiungi un messaggio locale per verificare che il rendering funzioni
+    setTimeout(() => {
+      addLog("Aggiunto messaggio di test iniziale");
+      setMessages(prev => [...prev, {
+        user: "System",
+        text: "Connessione alla chat stabilita",
+        time: new Date(),
+        type: "system"
+      }]);
+    }, 1000);
+
     // Gestisce la disconnessione
     return () => {
+      addLog("Pulizia event handlers");
       connection.off('ReceiveMessage');
       connection.off('ReceiveAudioChunk');
       connection.off('UserJoined');
@@ -128,7 +157,13 @@ const Chat = () => {
         }
       });
     };
-  }, [connection, messages, userName]);
+  // Rimuovi messages dalla dipendenza per evitare reregistrazioni multiple
+  }, [connection, userName, addLog]);
+
+  // Effetto per monitorare i cambiamenti nell'array dei messaggi
+  useEffect(() => {
+    addLog(`Numero di messaggi: ${messages.length}`);
+  }, [messages, addLog]);
 
   if (!userName || !roomName) {
     return (
@@ -144,8 +179,29 @@ const Chat = () => {
 
   return (
     <div className="chat-container" style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-      <h1>Chat: {roomName}</h1>
+      <h1>Chat: {roomName.trim()}</h1>
       <ConnectionStatus />
+      
+      {/* Debug button */}
+      <button onClick={() => {
+        addLog("Test button clicked");
+        setMessages(prev => [...prev, {
+          user: userName,
+          text: "Test message " + new Date().toLocaleTimeString(),
+          time: new Date(),
+          type: "text"
+        }]);
+      }} style={{
+        marginBottom: '10px',
+        padding: '5px 10px',
+        backgroundColor: '#9c27b0',
+        color: 'white',
+        border: 'none',
+        borderRadius: '4px',
+        cursor: 'pointer'
+      }}>
+        Test Message
+      </button>
       
       {/* UserList component */}
       <div className="user-list" style={{ 
@@ -155,25 +211,42 @@ const Chat = () => {
         borderRadius: '4px',
         backgroundColor: '#f9f9f9'
       }}>
-        <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Utenti nella stanza ({roomUsers.length})</h3>
+        <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>
+          Utenti nella stanza ({roomUsers.length})
+        </h3>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-          {roomUsers.map((user, index) => (
-            <div key={index} style={{ 
-              padding: '4px 10px', 
-              borderRadius: '15px', 
-              backgroundColor: user === userName ? '#2196F3' : '#e0e0e0',
-              color: user === userName ? 'white' : 'black',
-              fontSize: '14px'
-            }}>
-              {user} {user === userName ? '(tu)' : ''}
-            </div>
-          ))}
+          {roomUsers.length > 0 ? (
+            roomUsers.map((user, index) => (
+              <div key={index} style={{ 
+                padding: '4px 10px', 
+                borderRadius: '15px', 
+                backgroundColor: user === userName ? '#2196F3' : '#e0e0e0',
+                color: user === userName ? 'white' : 'black',
+                fontSize: '14px'
+              }}>
+                {user} {user === userName ? '(tu)' : ''}
+              </div>
+            ))
+          ) : (
+            <div style={{ color: '#777' }}>Nessun utente connesso</div>
+          )}
         </div>
       </div>
       
       <MessageList messages={messages} />
       <AudioRecorder userName={userName} />
       <MessageInput userName={userName} />
+      
+      {/* Debug status */}
+      <div style={{ 
+        marginTop: '10px', 
+        fontSize: '12px', 
+        color: '#777',
+        padding: '5px',
+        borderTop: '1px solid #eee'
+      }}>
+        Messaggi: {messages.length} | Utenti: {roomUsers.length}
+      </div>
     </div>
   );
 };
