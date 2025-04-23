@@ -32,6 +32,24 @@ const Chat = () => {
     localStorage.setItem('chatLogs', JSON.stringify(logs));
   }, []);
 
+  // Funzione per gestire l'audio registrato localmente
+  const handleAudioRecorded = useCallback((audioUrl, base64Chunks) => {
+    addLog('Audio registrato localmente');
+    
+    // Aggiungi il messaggio audio alla lista dei messaggi
+    setMessages(prevMessages => [...prevMessages, { 
+      user: userName, 
+      audioUrl: audioUrl,
+      audioChunks: base64Chunks,
+      totalChunks: base64Chunks.length,
+      receivedChunks: base64Chunks.length,
+      isComplete: true,
+      time: new Date(),
+      type: 'audio',
+      id: Date.now() 
+    }]);
+  }, [userName, addLog]);
+
   useEffect(() => {
     if (!connection) {
       addLog("No SignalR connection available yet", "warn");
@@ -58,6 +76,12 @@ const Chat = () => {
     // Registra il gestore per ricevere i chunk audio
     connection.on('ReceiveAudioChunk', (user, chunkBase64, chunkId, isLastChunk, totalChunks) => {
       addLog(`Ricevuto chunk audio ${chunkId}/${totalChunks} da ${user}`);
+      
+      // Non aggiungere messaggi audio dai nostri propri messaggi
+      if (user === userName) {
+        addLog('Ignorando chunk audio dal nostro utente poiché già aggiunto localmente');
+        return;
+      }
       
       if (chunkId === 0) {
         setMessages(prevMessages => [...prevMessages, { 
@@ -181,26 +205,19 @@ const Chat = () => {
     <div className="chat-container" style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
       <h1>Chat: {roomName.trim()}</h1>
       <ConnectionStatus />
-      
-      {/* Debug button */}
       <button onClick={() => {
-        addLog("Test button clicked");
-        setMessages(prev => [...prev, {
-          user: userName,
-          text: "Test message " + new Date().toLocaleTimeString(),
-          time: new Date(),
-          type: "text"
-        }]);
+        addLog("return login");
+        window.location.href = "/";
       }} style={{
         marginBottom: '10px',
         padding: '5px 10px',
-        backgroundColor: '#9c27b0',
+        backgroundColor: '#f44336',
         color: 'white',
         border: 'none',
         borderRadius: '4px',
         cursor: 'pointer'
       }}>
-        Test Message
+        Exit Chat
       </button>
       
       {/* UserList component */}
@@ -234,19 +251,8 @@ const Chat = () => {
       </div>
       
       <MessageList messages={messages} />
-      <AudioRecorder userName={userName} />
+      <AudioRecorder userName={userName} onAudioRecorded={handleAudioRecorded} />
       <MessageInput userName={userName} />
-      
-      {/* Debug status */}
-      <div style={{ 
-        marginTop: '10px', 
-        fontSize: '12px', 
-        color: '#777',
-        padding: '5px',
-        borderTop: '1px solid #eee'
-      }}>
-        Messaggi: {messages.length} | Utenti: {roomUsers.length}
-      </div>
     </div>
   );
 };

@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useSignalRConnection } from './SignalRConnectionProvider';
 import { MAX_CHUNK_SIZE, splitBlobIntoChunks } from './audioUtils';
 
-const AudioRecorder = ({ userName }) => {
+const AudioRecorder = ({ userName, onAudioRecorded }) => {
   const { connection } = useSignalRConnection();
   const [isRecording, setIsRecording] = useState(false);
   const [audioURL, setAudioURL] = useState('');
@@ -25,7 +25,6 @@ const AudioRecorder = ({ userName }) => {
       const options = {
         mimeType: 'audio/webm;codecs=opus',
         audioBitsPerSecond: 32000 
-        // audioBitsPerSecond: 128000 
       };
       
       const mediaRecorder = new MediaRecorder(stream, options);
@@ -55,6 +54,11 @@ const AudioRecorder = ({ userName }) => {
               // Dividi il blob in chunks più piccoli
               const base64Chunks = await splitBlobIntoChunks(audioBlob, MAX_CHUNK_SIZE);
               console.log(`Audio diviso in ${base64Chunks.length} chunks`);
+              
+              // Aggiungi il messaggio audio nella chat dell'utente corrente
+              if (onAudioRecorded) {
+                onAudioRecorded(audioUrl, base64Chunks);
+              }
               
               // Invia ogni chunk separatamente
               for (let i = 0; i < base64Chunks.length; i++) {
