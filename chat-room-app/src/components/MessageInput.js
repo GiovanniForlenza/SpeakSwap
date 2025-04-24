@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useSignalRConnection } from './SignalRConnectionProvider';
 
 const MessageInput = ({ userName }) => {
-  const { connection, connectionStatus } = useSignalRConnection();
+  const { connection, connectionStatus, language } = useSignalRConnection();
   const [message, setMessage] = useState('');
 
   const sendMessage = async () => {
@@ -23,8 +23,7 @@ const MessageInput = ({ userName }) => {
           }
         }
         
-        // Invia il messaggio di testo al server
-        await connection.invoke('SendMessage', userName, message);
+        await connection.invoke('SendMessage', userName, message, language);
         setMessage('');
       } catch (err) {
         console.error('Errore nell\'invio del messaggio:', err);

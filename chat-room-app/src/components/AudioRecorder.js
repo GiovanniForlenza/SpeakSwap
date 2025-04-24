@@ -3,7 +3,7 @@ import { useSignalRConnection } from './SignalRConnectionProvider';
 import { MAX_CHUNK_SIZE, splitBlobIntoChunks } from './audioUtils';
 
 const AudioRecorder = ({ userName, onAudioRecorded }) => {
-  const { connection } = useSignalRConnection();
+  const { connection, language } = useSignalRConnection();
   const [isRecording, setIsRecording] = useState(false);
   const [audioURL, setAudioURL] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -70,7 +70,8 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
                     base64Chunks[i], 
                     i, // chunk ID
                     isLastChunk,
-                    base64Chunks.length // numero totale di chunks
+                    base64Chunks.length, 
+                    language 
                   );
                   console.log(`Chunk ${i+1}/${base64Chunks.length} inviato con successo`);
                 } catch (chunkErr) {

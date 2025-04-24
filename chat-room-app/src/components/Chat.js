@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSignalRConnection } from './SignalRConnectionProvider';
-import { base64ArrayToBlob } from './audioUtils';
+import { base64ArrayToBlob, base64ToBlob } from './audioUtils';
 import { useLocation } from 'react-router-dom';
 import ConnectionStatus from './ConnectionStatus';
 import MessageList from './MessageList';
@@ -8,11 +8,12 @@ import MessageInput from './MessageInput';
 import AudioRecorder from './AudioRecorder';
 
 const Chat = () => {
-  const { connection, roomUsers, roomName } = useSignalRConnection() || { 
+  const { connection, roomUsers, roomName, language } = useSignalRConnection() || { 
     connection: null, 
     connectionStatus: 'Disconnected',
     roomUsers: [],
-    roomName: ''
+    roomName: '',
+    language: 'it'
   };
   const [messages, setMessages] = useState([]);
   const location = useLocation();
@@ -32,7 +33,6 @@ const Chat = () => {
     localStorage.setItem('chatLogs', JSON.stringify(logs));
   }, []);
 
-  // Funzione per gestire l'audio registrato localmente
   const handleAudioRecorded = useCallback((audioUrl, base64Chunks) => {
     addLog('Audio registrato localmente');
     
@@ -46,7 +46,7 @@ const Chat = () => {
       isComplete: true,
       time: new Date(),
       type: 'audio',
-      id: Date.now() 
+      id: Date.now(),
     }]);
   }, [userName, addLog]);
 
@@ -61,6 +61,7 @@ const Chat = () => {
     // Registra il gestore per ricevere i messaggi di testo
     connection.on('ReceiveMessage', (user, receivedMessage) => {
       addLog(`Messaggio ricevuto da ${user}: ${receivedMessage}`);
+            
       setMessages(prevMessages => {
         const newMessages = [...prevMessages, { 
           user, 
@@ -83,62 +84,65 @@ const Chat = () => {
         return;
       }
       
-      if (chunkId === 0) {
-        setMessages(prevMessages => [...prevMessages, { 
-          user, 
-          audioChunks: [chunkBase64],
-          totalChunks: totalChunks,
-          receivedChunks: 1,
-          isComplete: isLastChunk,
-          time: new Date(),
-          type: 'audio',
-          id: Date.now() 
-        }]);
-      } else {
-        setMessages(prevMessages => {
-          const audioMessages = prevMessages.filter(m => 
-            m.type === 'audio' && m.user === user && !m.isComplete);
-          
-          if (audioMessages.length === 0) {
-            addLog(`Nessun messaggio audio incompiuto trovato per ${user}`, "warn");
-            return prevMessages;
-          }
-          
-          const lastAudioMessage = audioMessages[audioMessages.length - 1];
-          
-          return prevMessages.map(msg => {
-            if (msg === lastAudioMessage) {
-              const newAudioChunks = [...msg.audioChunks, chunkBase64];
-              const isComplete = isLastChunk || newAudioChunks.length === msg.totalChunks;
-              
-              let audioUrl = msg.audioUrl;
-              if (isComplete && !msg.audioUrl) {
-                addLog(`Creazione blob audio per messaggio di ${user}`, "debug");
+      setMessages(prevMessages => {
+        // Trova messaggi audio esistenti dallo stesso utente che non sono ancora completi
+        const audioMessageIndex = prevMessages.findIndex(m => 
+          m.type === 'audio' && m.user === user && !m.isComplete
+        );
+        
+        // Se è il primo chunk o non troviamo un messaggio esistente, crea un nuovo messaggio
+        if (chunkId === 0 || audioMessageIndex === -1) {
+          return [...prevMessages, { 
+            user, 
+            audioChunks: [chunkBase64],
+            totalChunks: totalChunks,
+            receivedChunks: 1,
+            isComplete: isLastChunk,
+            time: new Date(),
+            type: 'audio',
+            id: Date.now()
+          }];
+        } // Altrimenti aggiorna il messaggio esistente
+        return prevMessages.map((msg, index) => {
+          if (index === audioMessageIndex) {
+            // Aggiungi il nuovo chunk alla lista
+            const newAudioChunks = [...msg.audioChunks, chunkBase64];
+            
+            // Determina se il messaggio è completo
+            const isComplete = isLastChunk || newAudioChunks.length >= msg.totalChunks;
+            
+            // Crea l'URL dell'audio se è completo e non esiste già
+            let audioUrl = msg.audioUrl;
+            if (isComplete && !audioUrl) {
+              try {
                 const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/webm');
                 audioUrl = URL.createObjectURL(audioBlob);
+                console.log(`Audio completo creato per ${user}`);
+              } catch (error) {
+                console.error('Errore nella creazione del blob audio:', error);
               }
-              
-              return {
-                ...msg,
-                audioChunks: newAudioChunks,
-                receivedChunks: msg.receivedChunks + 1,
-                isComplete: isComplete,
-                audioUrl: audioUrl
-              };
             }
-            return msg;
-          });
+            
+            return {
+              ...msg,
+              audioChunks: newAudioChunks,
+              receivedChunks: msg.receivedChunks + 1,
+              isComplete: isComplete,
+              audioUrl: audioUrl
+            };
+          }
+          return msg;
         });
-      }
+      });
     });
 
     // Aggiunge un messaggio di sistema quando un utente entra o esce
-    connection.on('UserJoined', (user) => {
+    connection.on('UserJoined', (user, userLang) => {
       if (user !== userName) {
-        addLog(`Utente ${user} è entrato nella stanza`);
+        addLog(`Utente ${user} è entrato nella stanza con lingua: ${userLang}`);
         setMessages(prevMessages => [...prevMessages, {
           user: 'System',
-          text: `${user} è entrato nella stanza`,
+          text: `${user} è entrato nella stanza (${userLang})`,
           time: new Date(),
           type: 'system'
         }]);
@@ -155,7 +159,31 @@ const Chat = () => {
       }]);
     });
 
-    // Debug: aggiungi un messaggio locale per verificare che il rendering funzioni
+    connection.on('ReceiveTranslatedAudio', (user, audioBase64, targetLanguage, translatedText) => {
+      addLog(`Ricevuto audio tradotto da ${user} in lingua ${targetLanguage}`);
+      
+      // Crea un blob audio dai dati base64
+      try {
+        const audioBlob = base64ToBlob(audioBase64, 'audio/webm');
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        // Messaggio audio tradotto alla lista dei messaggi
+        setMessages(prevMessages => [...prevMessages, { 
+          user, 
+          audioUrl: audioUrl,
+          isComplete: true,
+          translatedText: translatedText,
+          time: new Date(),
+          type: 'translatedAudio',
+          language: targetLanguage,
+          id: Date.now() 
+        }]);
+      } catch (error) {
+        console.error('Errore nella conversione dell\'audio tradotto:', error);
+      }
+    });
+
+    // Debug: Messaggio locale per verificare che il rendering funzioni
     setTimeout(() => {
       addLog("Aggiunto messaggio di test iniziale");
       setMessages(prev => [...prev, {
@@ -217,7 +245,7 @@ const Chat = () => {
         borderRadius: '4px',
         cursor: 'pointer'
       }}>
-        Exit Chat
+        Esci dalla Chat
       </button>
       
       {/* UserList component */}
@@ -241,7 +269,7 @@ const Chat = () => {
                 color: user === userName ? 'white' : 'black',
                 fontSize: '14px'
               }}>
-                {user} {user === userName ? '(tu)' : ''}
+                {user} {user === userName ? `(tu - ${language})` : ''}
               </div>
             ))
           ) : (

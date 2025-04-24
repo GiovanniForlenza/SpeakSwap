@@ -16,8 +16,9 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
   const queryParams = new URLSearchParams(location.search);
   const userName = queryParams.get("userName");
   const roomName = queryParams.get("roomName");
+  const language = queryParams.get("language") || 'it';
 
-  const joinRoom = useCallback(async (conn, user, room) => {
+  const joinRoom = useCallback(async (conn, user, room, lang) => {
     if (!conn || conn.state !== 'Connected') {
       console.error("Impossibile entrare nella stanza: connessione non attiva");
       return false;
@@ -32,8 +33,8 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
         return false;
       }
       
-      console.log(`Entrando nella stanza ${room} come ${user}...`);
-      await conn.invoke('JoinRoom', user, room, 'it');
+      console.log(`Entrando nella stanza ${room} come ${user} con lingua ${lang}...`);
+      await conn.invoke('JoinRoom', user, room, lang);
       console.log(`Entrato nella stanza ${room}`);
       return true;
     } catch (err) {
@@ -114,7 +115,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
             
             // Quando riconnesso, rientra automaticamente nella stanza
             if (userName && roomName) {
-              joinRoom(hubConnection, userName, roomName);
+              joinRoom(hubConnection, userName, roomName, language);
             }
           });
           
@@ -169,10 +170,10 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
         
         // Dopo la connessione, entra nella stanza
         if (userName && roomName) {
-          const joined = await joinRoom(hubConnection, userName, roomName);
+          const joined = await joinRoom(hubConnection, userName, roomName, language);
           if (!joined) {
             addLog('Impossibile entrare nella stanza, riprovo...', 'warn');
-            setTimeout(() => joinRoom(hubConnection, userName, roomName), 2000);
+            setTimeout(() => joinRoom(hubConnection, userName, roomName, language), 2000);
           }
         }
       } catch (err) {
@@ -222,7 +223,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
         addLog('Connessione fermata');
       }
     };
-  }, [hubUrl, userName, roomName, joinRoom, navigate]);
+  }, [hubUrl, userName, roomName, joinRoom, navigate, language]);
 
   // Context value
   const contextValue = {
@@ -230,6 +231,7 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
     connectionStatus,
     roomUsers,
     roomName,
+    language,
     reconnectCount
   };
 

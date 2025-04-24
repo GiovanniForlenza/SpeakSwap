@@ -88,6 +88,26 @@ const MessageList = ({ messages }) => {
                 )}
               </div>
             )}
+
+            {msg.type === 'translatedAudio' && (
+              <div>
+                <audio src={msg.audioUrl} controls style={{ marginTop: '5px' }} />
+                {msg.translatedText && (
+                  <div style={{ 
+                    fontSize: '0.9em', 
+                    fontStyle: 'italic', 
+                    color: '#555', 
+                    marginTop: '4px',
+                    padding: '4px 8px',
+                    backgroundColor: '#f8f8f8',
+                    borderRadius: '4px'
+                  }}>
+                    "{msg.translatedText}"
+                  </div>
+                )}
+              </div>
+            )}
+            
           </div>
         ))
       ) : (
