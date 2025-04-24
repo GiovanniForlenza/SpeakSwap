@@ -1,135 +1,113 @@
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
-using System;
+using Microsoft.Extensions.Configuration;
 using System.IO;
 using System.Threading.Tasks;
 
-namespace AudioChatServer.Services
+public class SpeechService
 {
-    public class SpeechService
+    private readonly string _speechKey;
+    private readonly string _speechRegion;
+
+    public SpeechService(IConfiguration configuration)
     {
-        private readonly string _speechKey;
-        private readonly string _speechRegion;
-        private readonly ILogger<SpeechService> _logger;
+        _speechKey = configuration["Azure:SpeechKey"];
+        _speechRegion = configuration["Azure:SpeechRegion"];
+    }
 
-        public SpeechService(IConfiguration configuration, ILogger<SpeechService> logger)
+    // Converte audio in testo
+    public async Task<string> SpeechToTextAsync(string audioBase64, string language)
+    {
+        // Configura il servizio Speech
+        var config = SpeechConfig.FromSubscription(_speechKey, _speechRegion);
+        config.SpeechRecognitionLanguage = GetSpeechLanguageCode(language);
+
+        // Converte base64 in stream di byte
+        byte[] audioBytes = Convert.FromBase64String(audioBase64);
+        using var audioStream = new MemoryStream(audioBytes);
+
+        // Crea il formato audio corretto per SpeechSDK
+        using var audioInput = AudioInputStream.CreatePushStream();
+
+        // Copia i dati dal MemoryStream al PushStream
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        audioStream.Position = 0;
+        while ((bytesRead = audioStream.Read(buffer, 0, buffer.Length)) > 0)
         {
-            _speechKey = configuration["Azure:SpeechKey"];
-            _speechRegion = configuration["Azure:SpeechRegion"];
-            _logger = logger;
+            audioInput.Write(buffer, bytesRead);
         }
 
-        // Converte audio (base64) in testo
-        public async Task<string> SpeechToTextAsync(string audioBase64, string language)
+        // Segnala la fine dello stream
+        audioInput.Close();
+
+        // Crea il riconoscitore vocale con lo stream corretto
+        using var audioConfig = AudioConfig.FromStreamInput(audioInput);
+        using var recognizer = new SpeechRecognizer(config, audioConfig);
+
+        // Esegui il riconoscimento
+        var result = await recognizer.RecognizeOnceAsync();
+
+        // Verifica il risultato
+        if (result.Reason == ResultReason.RecognizedSpeech)
         {
-            try
-            {
-                // Configurazione del servizio
-                var config = SpeechConfig.FromSubscription(_speechKey, _speechRegion);
-                config.SpeechRecognitionLanguage = GetLanguageCode(language);
-
-                config.EnableDictation(); 
-                config.SetProperty(PropertyId.Speech_SegmentationSilenceTimeoutMs, "1000");
-
-                // Converti base64 in byte array
-                byte[] audioBytes = Convert.FromBase64String(audioBase64);
-
-                // Crea un PushAudioInputStream
-                using var audioInputStream = AudioInputStream.CreatePushStream();
-                using var audioConfig = AudioConfig.FromStreamInput(audioInputStream);
-
-                // Scrivi i dati nello stream
-                audioInputStream.Write(audioBytes);
-                audioInputStream.Close();
-
-                // Crea un riconoscitore
-                using var recognizer = new SpeechRecognizer(config, audioConfig);
-
-                // Riconosci l'audio
-                var result = await recognizer.RecognizeOnceAsync();
-
-                // Gestisci il risultato
-                if (result.Reason == ResultReason.RecognizedSpeech)
-                {
-                    _logger.LogInformation($"STT completato con successo: '{result.Text}'");
-                    return result.Text;
-                }
-                else
-                {
-                    _logger.LogWarning($"STT fallito: {result.Reason}");
-                    return string.Empty;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Errore durante Speech-to-Text");
-                throw;
-            }
+            return result.Text;
         }
 
-        // Converte testo in audio (base64)
-        public async Task<string> TextToSpeechAsync(string text, string language)
+        return string.Empty;
+    }
+
+    // Converte testo in audio
+    public async Task<string> TextToSpeechAsync(string text, string language)
+    {
+        // Configura il servizio Speech
+        var config = SpeechConfig.FromSubscription(_speechKey, _speechRegion);
+        config.SpeechSynthesisLanguage = GetSpeechLanguageCode(language);
+
+        // Imposta una voce appropriata per la lingua
+        config.SpeechSynthesisVoiceName = GetVoiceForLanguage(language);
+
+        // Crea il sintetizzatore
+        using var synthesizer = new SpeechSynthesizer(config);
+
+        // Sintetizza il testo in audio
+        using var result = await synthesizer.SpeakTextAsync(text);
+
+        // Verifica il risultato
+        if (result.Reason == ResultReason.SynthesizingAudioCompleted)
         {
-            try
-            {
-                // Configurazione del servizio
-                var config = SpeechConfig.FromSubscription(_speechKey, _speechRegion);
-                config.SpeechSynthesisLanguage = GetLanguageCode(language);
-                config.SpeechSynthesisVoiceName = GetVoiceName(language);
-
-                // Crea un sintetizzatore
-                using var synthesizer = new SpeechSynthesizer(config);
-
-                // Sintetizza il testo in audio
-                using var result = await synthesizer.SpeakTextAsync(text);
-
-                // Gestisci il risultato
-                if (result.Reason == ResultReason.SynthesizingAudioCompleted)
-                {
-                    // Converti l'audio in base64
-                    var audioBase64 = Convert.ToBase64String(result.AudioData);
-                    _logger.LogInformation($"TTS completato con successo, dimensione audio: {audioBase64.Length} bytes");
-                    return audioBase64;
-                }
-                else
-                {
-                    _logger.LogWarning($"TTS fallito: {result.Reason}");
-                    return string.Empty;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Errore durante Text-to-Speech");
-                throw;
-            }
+            // Converte l'audio in base64
+            return Convert.ToBase64String(result.AudioData);
         }
 
-        // Mappa codici lingua brevi in codici BCP-47 completi
-        private string GetLanguageCode(string shortCode)
-        {
-            return shortCode switch
-            {
-                "it" => "it-IT",
-                "en" => "en-US",
-                "fr" => "fr-FR",
-                "de" => "de-DE",
-                "es" => "es-ES",
-                _ => "it-IT" // Default
-            };
-        }
+        return string.Empty;
+    }
 
-        // Seleziona la voce in base alla lingua
-        private string GetVoiceName(string shortCode)
+    // Mappa codici lingua per il servizio Speech
+    private string GetSpeechLanguageCode(string language)
+    {
+        return language switch
         {
-            return shortCode switch
-            {
-                "it" => "it-IT-ElsaNeural",
-                "en" => "en-US-AriaNeural",
-                "fr" => "fr-FR-DeniseNeural",
-                "de" => "de-DE-KatjaNeural",
-                "es" => "es-ES-ElviraNeural",
-                _ => "it-IT-ElsaNeural" // Default
-            };
-        }
+            "it" => "it-IT",
+            "en" => "en-US",
+            "fr" => "fr-FR",
+            "es" => "es-ES",
+            "de" => "de-DE",
+            _ => "en-US"
+        };
+    }
+
+    // Mappa voci per il servizio Speech
+    private string GetVoiceForLanguage(string language)
+    {
+        return language switch
+        {
+            "it" => "it-IT-DiegoNeural",
+            "en" => "en-US-JennyNeural",
+            "fr" => "fr-FR-DeniseNeural",
+            "es" => "es-ES-ElviraNeural",
+            "de" => "de-DE-KatjaNeural",
+            _ => "en-US-JennyNeural"
+        };
     }
 }
