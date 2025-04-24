@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 function Login() {
     const [userName, setUserName] = useState("");
     const [roomName, setRoomName] = useState("");
+    const [language, setLanguage] = useState("it");
     const [isLoading, setIsLoading] = useState(false);
     const navigate = useNavigate();
 
@@ -21,7 +22,7 @@ function Login() {
         setIsLoading(true);
         
         // Navigate to chat with parameters
-        navigate(`/chat?userName=${encodeURIComponent(userName)}&roomName=${encodeURIComponent(roomName)}`);
+        navigate(`/chat?userName=${encodeURIComponent(userName)}&roomName=${encodeURIComponent(roomName)}&language=${encodeURIComponent(language)}`);
     };
 
     return (
@@ -74,6 +75,23 @@ function Login() {
                     />
                 </div>
                 
+                <div style={{ marginBottom: '20px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px' }}>Language:</label>
+                    <select
+                        value={language}
+                        onChange={(e) => setLanguage(e.target.value)}
+                        style={{
+                            width: '100%',
+                            padding: '8px',
+                            borderRadius: '4px',
+                            border: '1px solid #ddd'
+                        }}
+                    >
+                        <option value="it">Italian</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+
                 <button 
                     onClick={handleLogin}
                     disabled={isLoading}
