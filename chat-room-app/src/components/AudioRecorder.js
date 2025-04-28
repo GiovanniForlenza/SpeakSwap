@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React, { useState, useRef } from 'react';
 import { useSignalRConnection } from './SignalRConnectionProvider';
 import { MAX_CHUNK_SIZE, splitBlobIntoChunks } from './audioUtils';
