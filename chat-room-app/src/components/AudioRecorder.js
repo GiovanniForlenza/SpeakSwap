@@ -60,10 +60,16 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
                 onAudioRecorded(audioUrl, base64Chunks);
               }
               
+              // Genera un ID sessione audio per questo messaggio
+              const audioSessionId = Date.now().toString();
+              console.log(`ID Sessione Audio: ${audioSessionId}`);
+              
               // Invia ogni chunk separatamente
               for (let i = 0; i < base64Chunks.length; i++) {
                 try {
                   const isLastChunk = i === base64Chunks.length - 1;
+                  console.log(`Invio chunk ${i}/${base64Chunks.length-1}, isLastChunk=${isLastChunk}`);
+                  
                   await connection.invoke(
                     'SendAudioChunk', 
                     userName, 
@@ -71,7 +77,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
                     i, // chunk ID
                     isLastChunk,
                     base64Chunks.length, 
-                    language 
+                    language
                   );
                   console.log(`Chunk ${i+1}/${base64Chunks.length} inviato con successo`);
                 } catch (chunkErr) {
@@ -117,93 +123,6 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       alert('Impossibile accedere al microfono: ' + err.message);
     }
   };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      // Ferma tutti i tracciamenti audio per evitare che il microfono resti attivo
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      setIsRecording(false);
-    }
-  };
-
-  return (
-    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
-      {!isRecording ? (
-        <button 
-          onClick={startRecording} 
-          disabled={isSending}
-          style={{ 
-            padding: '8px 16px',
-            backgroundColor: isSending ? '#ccc' : '#4CAF50',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: isSending ? 'not-allowed' : 'pointer'
-          }}
-        >
-          Registra Audio
-        </button>
-      ) : (
-        <button 
-          onClick={stopRecording} 
-          style={{ 
-            padding: '8px 16px',
-            backgroundColor: '#f44336',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px'
-          }}
-        >
-          Ferma Registrazione
-        </button>
-      )}
-      
-      {isRecording && (
-        <span style={{ color: 'red', display: 'inline-flex', alignItems: 'center' }}>
-          <span style={{ 
-            display: 'inline-block', 
-            width: '12px', 
-            height: '12px', 
-            backgroundColor: 'red', 
-            borderRadius: '50%', 
-            marginRight: '8px',
-            animation: 'pulse 1.5s infinite'
-          }}></span>
-          Registrazione in corso...
-        </span>
-      )}
-      
-      {isSending && (
-        <span style={{ color: 'blue', display: 'inline-flex', alignItems: 'center' }}>
-          <span style={{ 
-            display: 'inline-block', 
-            width: '12px', 
-            height: '12px', 
-            backgroundColor: 'blue', 
-            borderRadius: '50%', 
-            marginRight: '8px',
-            animation: 'pulse 1.5s infinite'
-          }}></span>
-          Invio audio in corso...
-        </span>
-      )}
-      
-      {audioURL && !isRecording && !isSending && (
-        <audio src={audioURL} controls />
-      )}
-      
-      <style>
-        {`
-          @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-          }
-        `}
-      </style>
-    </div>
-  );
-};
+}
 
 export default AudioRecorder;

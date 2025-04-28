@@ -15,6 +15,18 @@ public class ChatHub : Hub
     private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _rooms =
         new ConcurrentDictionary<string, ConcurrentDictionary<string, string>>();
 
+    // Dizionario per memorizzare i chunk audio in arrivo: sessionKey -> List<AudioChunk>
+    private readonly ConcurrentDictionary<string, List<AudioChunk>> _pendingAudioChunks =
+        new ConcurrentDictionary<string, List<AudioChunk>>();
+
+    // Dizionario per tenere traccia delle sessioni audio attive per utente: userKey -> sessionKey
+    private readonly ConcurrentDictionary<string, string> _userAudioSessions =
+        new ConcurrentDictionary<string, string>();
+
+    private readonly ConcurrentDictionary<string, long> _sessionCounters =
+        new ConcurrentDictionary<string, long>();
+
+
     public ChatHub(ILogger<ChatHub> logger, TranslationService translationService, SpeechService speechService)
     {
         _logger = logger;
@@ -92,6 +104,14 @@ public class ChatHub : Hub
             {
                 var userName = userConnection.UserName;
                 var roomName = userConnection.RoomName;
+
+                // Rimuovi le sessioni audio dell'utente
+                string userKey = $"{userName}_{roomName}";
+                if (_userAudioSessions.TryRemove(userKey, out var sessionKey))
+                {
+                    _pendingAudioChunks.TryRemove(sessionKey, out _);
+                    _logger.LogInformation($"Sessione audio rimossa per l'utente {userName}");
+                }
 
                 // Rimuovi l'utente dalla stanza
                 if (_rooms.TryGetValue(roomName, out var users))
@@ -203,10 +223,6 @@ public class ChatHub : Hub
         }
     }
 
-    private readonly ConcurrentDictionary<string, List<AudioChunk>> _pendingAudioChunks =
-        new ConcurrentDictionary<string, List<AudioChunk>>();
-
-    // Invia un chunk audio
     public async Task SendAudioChunk(string userName, string chunk, int chunkId, bool isLastChunk, int totalChunks, string sourceLanguage)
     {
         try
@@ -216,22 +232,47 @@ public class ChatHub : Hub
             if (_connections.TryGetValue(connectionId, out var userConnection))
             {
                 var roomName = userConnection.RoomName;
-                _logger.LogInformation($"Chunk audio {chunkId}/{totalChunks} da {userName} nella stanza {roomName}");
+                _logger.LogInformation($"Chunk audio {chunkId}/{totalChunks} da {userName} nella stanza {roomName}, isLastChunk: {isLastChunk}");
 
-                // Crea una chiave unica per questo messaggio audio
-                string audioMessageKey = $"{userName}_{roomName}_{DateTime.Now.Ticks}";
+                // IMPORTANTE: Crea una chiave utente
+                string userKey = $"{userName}_{roomName}";
 
-                // Aggiungi il chunk alla collezione
+                // Ottieni o crea un ID sessione per questa serie di chunk
+                string sessionId;
+
                 if (chunkId == 0)
                 {
-                    _pendingAudioChunks[audioMessageKey] = new List<AudioChunk>();
+                    // Se è il primo chunk, genera un nuovo ID sessione
+                    sessionId = _sessionCounters.AddOrUpdate(userKey, 1, (_, count) => count + 1).ToString();
+                    _userAudioSessions[userKey] = sessionId;
+
+                    // Crea una nuova lista di chunk
+                    _pendingAudioChunks[$"{userKey}_{sessionId}"] = new List<AudioChunk>();
+                    _logger.LogInformation($"Creata nuova sessione audio {userKey}_{sessionId} per il primo chunk");
+                }
+                else
+                {
+                    // Per i chunk successivi, usa la sessione esistente
+                    if (!_userAudioSessions.TryGetValue(userKey, out sessionId))
+                    {
+                        // Se la sessione non esiste (per qualche motivo), crea una nuova
+                        sessionId = _sessionCounters.AddOrUpdate(userKey, 1, (_, count) => count + 1).ToString();
+                        _userAudioSessions[userKey] = sessionId;
+                        _pendingAudioChunks[$"{userKey}_{sessionId}"] = new List<AudioChunk>();
+                        _logger.LogWarning($"Sessione non trovata per chunk {chunkId}. Creata nuova sessione {userKey}_{sessionId}");
+                    }
                 }
 
-                if (_pendingAudioChunks.TryGetValue(audioMessageKey, out var chunks))
+                // Chiave completa per la sessione
+                string sessionKey = $"{userKey}_{sessionId}";
+
+                // Aggiungi il chunk alla collezione corretta
+                if (_pendingAudioChunks.TryGetValue(sessionKey, out var chunks))
                 {
                     chunks.Add(new AudioChunk { ChunkId = chunkId, Data = chunk, IsLastChunk = isLastChunk });
+                    _logger.LogInformation($"Chunk {chunkId} aggiunto alla sessione {sessionKey}, ora contiene {chunks.Count}/{totalChunks} chunks");
 
-                    // Invia il chunk audio a tutti gli altri utenti nella stanza
+                    // Invia il chunk agli altri utenti
                     await Clients.GroupExcept(roomName, connectionId).SendAsync(
                         "ReceiveAudioChunk",
                         userName,
@@ -240,40 +281,40 @@ public class ChatHub : Hub
                         isLastChunk,
                         totalChunks);
 
-                    // Se è l'ultimo chunk, processa l'audio completo
-                    if (isLastChunk)
+                    // Se è l'ultimo chunk o abbiamo tutti i chunk, elabora l'audio
+                    if (isLastChunk || chunks.Count >= totalChunks)
                     {
+                        _logger.LogInformation($"Elaborazione audio avviata per {sessionKey}: {chunks.Count}/{totalChunks} chunks");
+
                         // Ordina i chunk per ID
                         chunks.Sort((a, b) => a.ChunkId.CompareTo(b.ChunkId));
 
-                        // Combina tutti i chunk in un unico blob audio
-                        string completeAudioBase64 = CombineAudioChunks(chunks);
+                        // Combina in un unico blob
+                        string completeAudio = string.Join("", chunks.Select(c => c.Data));
+                        _logger.LogInformation($"Audio combinato con successo: {completeAudio.Length} caratteri");
 
-                        // Processa l'audio per la traduzione
+                        // Processa l'audio in un task separato
                         _ = Task.Run(async () =>
                         {
                             try
                             {
-                                await ProcessAudioForTranslation(
-                                    userName,
-                                    roomName,
-                                    completeAudioBase64,
-                                    sourceLanguage);
+                                await ProcessAudioForTranslation(userName, roomName, completeAudio, sourceLanguage);
 
-                                // Rimuovi i chunk dopo il processamento
-                                _pendingAudioChunks.TryRemove(audioMessageKey, out _);
+                                // Pulisci le risorse
+                                _pendingAudioChunks.TryRemove(sessionKey, out _);
+                                _userAudioSessions.TryRemove(userKey, out _);
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, $"Errore nel processamento dell'audio per {userName}");
+                                _logger.LogError(ex, $"Errore nell'elaborazione dell'audio per {sessionKey}");
                             }
                         });
                     }
                 }
-            }
-            else
-            {
-                _logger.LogWarning($"SendAudioChunk: Utente {userName} non trovato nelle connessioni");
+                else
+                {
+                    _logger.LogError($"Impossibile trovare la collezione per la sessione {sessionKey}");
+                }
             }
         }
         catch (Exception ex)
@@ -284,29 +325,57 @@ public class ChatHub : Hub
 
     private string CombineAudioChunks(List<AudioChunk> chunks)
     {
+        _logger.LogInformation($"Combinazione di {chunks.Count} chunks audio");
         var combinedChunks = string.Join("", chunks.Select(c => c.Data));
+        _logger.LogInformation($"Chunks combinati, lunghezza totale: {combinedChunks.Length} caratteri");
         return combinedChunks;
     }
 
-    private async Task ProcessAudioForTranslation(string userName, string roomName, string audioBase64, string sourceLanguage)
+    private async Task<bool> ProcessAudioForTranslation(string userName, string roomName, string audioBase64, string sourceLanguage)
     {
         try
         {
+            _logger.LogInformation($"INIZIO PROCESSAMENTO AUDIO per {userName} in stanza {roomName}, lunghezza base64: {audioBase64.Length} caratteri");
+
             // 1. Converti audio in testo
-            string recognizedText = await _speechService.SpeechToTextAsync(audioBase64, sourceLanguage);
+            string recognizedText;
+            try
+            {
+                recognizedText = await _speechService.SpeechToTextAsync(audioBase64, sourceLanguage);
+                _logger.LogInformation($"Speech-to-text completato per {userName}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"ERRORE in speech-to-text per {userName}: {ex.Message}");
+                return false;
+            }
 
             if (string.IsNullOrEmpty(recognizedText))
             {
                 _logger.LogWarning($"Nessun testo riconosciuto dall'audio di {userName}");
-                return;
+
+                // Debug: Verifica formato audio salvando un campione
+                try
+                {
+                    byte[] audioBytes = Convert.FromBase64String(audioBase64);
+                    _logger.LogInformation($"[DEBUG] Audio decodificato: {audioBytes.Length} bytes, primi byte: {string.Join(", ", audioBytes.Take(20).Select(b => b.ToString("X2")))}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[DEBUG] Errore nella decodifica dell'audio base64");
+                }
+
+                return false;
             }
 
-            _logger.LogInformation($"Testo riconosciuto dall'audio di {userName}: {recognizedText}");
+            _logger.LogInformation($"Testo riconosciuto dall'audio di {userName}: \"{recognizedText}\"");
 
             // 2. Ottieni le lingue target e le connessioni per ciascuna lingua
             var connectionsByLanguage = GetConnectionsByLanguage(roomName, userName);
+            _logger.LogInformation($"Traduzione necessaria per {connectionsByLanguage.Count} lingue diverse");
 
             // 3. Per ogni lingua target, traduci e converti in audio
+            bool anySuccess = false;
             foreach (var entry in connectionsByLanguage)
             {
                 var targetLanguage = entry.Key;
@@ -315,6 +384,7 @@ public class ChatHub : Hub
                 // Salta la traduzione se la lingua è la stessa
                 if (targetLanguage == sourceLanguage)
                 {
+                    _logger.LogInformation($"Lingua target {targetLanguage} uguale a lingua sorgente, salto traduzione");
                     continue;
                 }
 
@@ -323,7 +393,7 @@ public class ChatHub : Hub
                 try
                 {
                     translatedText = await _translationService.TranslateTextAsync(recognizedText, sourceLanguage, targetLanguage);
-                    _logger.LogInformation($"Testo audio tradotto da {sourceLanguage} a {targetLanguage}: {translatedText}");
+                    _logger.LogInformation($"Testo audio tradotto da {sourceLanguage} a {targetLanguage}: \"{translatedText}\"");
                 }
                 catch (Exception ex)
                 {
@@ -336,7 +406,7 @@ public class ChatHub : Hub
                 try
                 {
                     translatedAudioBase64 = await _speechService.TextToSpeechAsync(translatedText, targetLanguage);
-                    _logger.LogInformation($"Testo tradotto convertito in audio per lingua {targetLanguage}");
+                    _logger.LogInformation($"Testo tradotto convertito in audio per lingua {targetLanguage}, lunghezza audio: {translatedAudioBase64.Length} caratteri");
                 }
                 catch (Exception ex)
                 {
@@ -347,24 +417,43 @@ public class ChatHub : Hub
                 // Invia l'audio tradotto agli utenti
                 try
                 {
-                    await Clients.Clients(targetConnections).SendAsync(
-                        "ReceiveTranslatedAudio",
-                        userName,
-                        translatedAudioBase64,
-                        targetLanguage,
-                        translatedText);
+                    _logger.LogInformation($"Invio audio tradotto a {targetConnections.Count} utenti con lingua {targetLanguage}");
 
-                    _logger.LogInformation($"Audio tradotto inviato a {targetConnections.Count} utenti con lingua {targetLanguage}");
+                    foreach (var conn in targetConnections)
+                    {
+                        await Clients.Client(conn).SendAsync(
+                            "ReceiveTranslatedAudio",
+                            userName,
+                            translatedAudioBase64,
+                            targetLanguage,
+                            translatedText);
+                    }
+
+                    _logger.LogInformation($"Audio tradotto inviato con successo a utenti con lingua {targetLanguage}");
+                    anySuccess = true;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, $"Errore nell'invio dell'audio tradotto per lingua {targetLanguage}");
+                    _logger.LogError(ex, $"Errore nell'invio dell'audio tradotto per lingua {targetLanguage}: {ex.Message}");
                 }
+            }
+
+            // Se almeno una traduzione ha avuto successo, considera l'intero processo come riuscito
+            if (anySuccess)
+            {
+                _logger.LogInformation($"COMPLETATO processamento audio per {userName} con successo");
+                return true;
+            }
+            else
+            {
+                _logger.LogWarning($"Processamento audio per {userName} completato senza successi");
+                return false;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Errore globale nel processamento dell'audio per {userName}");
+            return false;
         }
     }
 
@@ -413,6 +502,27 @@ public class ChatHub : Hub
         return languages.ToList();
     }
 
+    // Pulisce le sessioni audio scadute
+    private void CleanupOldAudioSessions()
+    {
+        // Chiamato periodicamente o dopo ogni completamento audio
+        var keysToRemove = new List<string>();
+
+        foreach (var session in _userAudioSessions)
+        {
+            if (!_pendingAudioChunks.ContainsKey(session.Value))
+            {
+                keysToRemove.Add(session.Key);
+            }
+        }
+
+        foreach (var key in keysToRemove)
+        {
+            _userAudioSessions.TryRemove(key, out _);
+            _logger.LogInformation($"Sessione audio rimossa per {key}");
+        }
+    }
+
     public string Ping()
     {
         _logger.LogInformation($"Ping chiamato da ConnectionId {Context.ConnectionId}");
@@ -422,7 +532,7 @@ public class ChatHub : Hub
     private class AudioChunk
     {
         public int ChunkId { get; set; }
-        public string Data { get; set; }
+        public string Data { get; set; } = string.Empty;
         public bool IsLastChunk { get; set; }
     }
 

@@ -76,64 +76,87 @@ const Chat = () => {
 
     // Registra il gestore per ricevere i chunk audio
     connection.on('ReceiveAudioChunk', (user, chunkBase64, chunkId, isLastChunk, totalChunks) => {
-      addLog(`Ricevuto chunk audio ${chunkId}/${totalChunks} da ${user}`);
+      console.log(`[AUDIO DEBUG] Ricevuto chunk audio ${chunkId}/${totalChunks} da ${user} (isLastChunk: ${isLastChunk})`);
       
       // Non aggiungere messaggi audio dai nostri propri messaggi
       if (user === userName) {
-        addLog('Ignorando chunk audio dal nostro utente poiché già aggiunto localmente');
+        console.log('[AUDIO DEBUG] Ignorando chunk audio dal nostro utente poiché già aggiunto localmente');
         return;
       }
       
-      setMessages(prevMessages => {
-        // Trova messaggi audio esistenti dallo stesso utente che non sono ancora completi
-        const audioMessageIndex = prevMessages.findIndex(m => 
-          m.type === 'audio' && m.user === user && !m.isComplete
-        );
-        
-        // Se è il primo chunk o non troviamo un messaggio esistente, crea un nuovo messaggio
-        if (chunkId === 0 || audioMessageIndex === -1) {
-          return [...prevMessages, { 
-            user, 
-            audioChunks: [chunkBase64],
-            totalChunks: totalChunks,
-            receivedChunks: 1,
-            isComplete: isLastChunk,
-            time: new Date(),
-            type: 'audio',
-            id: Date.now()
-          }];
-        } // Altrimenti aggiorna il messaggio esistente
-        return prevMessages.map((msg, index) => {
-          if (index === audioMessageIndex) {
-            // Aggiungi il nuovo chunk alla lista
-            const newAudioChunks = [...msg.audioChunks, chunkBase64];
-            
-            // Determina se il messaggio è completo
-            const isComplete = isLastChunk || newAudioChunks.length >= msg.totalChunks;
-            
-            // Crea l'URL dell'audio se è completo e non esiste già
-            let audioUrl = msg.audioUrl;
-            if (isComplete && !audioUrl) {
-              try {
-                const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/webm');
-                audioUrl = URL.createObjectURL(audioBlob);
-                console.log(`Audio completo creato per ${user}`);
-              } catch (error) {
-                console.error('Errore nella creazione del blob audio:', error);
-              }
-            }
-            
-            return {
-              ...msg,
-              audioChunks: newAudioChunks,
-              receivedChunks: msg.receivedChunks + 1,
-              isComplete: isComplete,
-              audioUrl: audioUrl
-            };
+      if (chunkId === 0) {
+        console.log(`[AUDIO DEBUG] Creazione nuovo messaggio audio per primo chunk (0/${totalChunks})`);
+        setMessages(prevMessages => [...prevMessages, { 
+          user, 
+          audioChunks: [chunkBase64],
+          totalChunks: totalChunks,
+          receivedChunks: 1,
+          isComplete: isLastChunk,
+          time: new Date(),
+          type: 'audio',
+          id: Date.now() 
+        }]);
+      } else {
+        console.log(`[AUDIO DEBUG] Gestione chunk audio ${chunkId}/${totalChunks}`);
+        setMessages(prevMessages => {
+          // Trova tutti i messaggi audio incompleti per questo utente
+          const audioMessages = prevMessages.filter(m => 
+            m.type === 'audio' && m.user === user && !m.isComplete);
+          
+          console.log(`[AUDIO DEBUG] Trovati ${audioMessages.length} messaggi audio incompleti`);
+          
+          if (audioMessages.length === 0) {
+            console.log('[AUDIO DEBUG] ATTENZIONE: Nessun messaggio audio incompiuto trovato', {
+              user,
+              chunkId,
+              totalChunks,
+              numMessages: prevMessages.length,
+              audioMessages: prevMessages.filter(m => m.type === 'audio')
+            });
+            return prevMessages;
           }
-          return msg;
+          
+          // Prendi il messaggio audio più recente
+          const lastAudioMessage = audioMessages[audioMessages.length - 1];
+          console.log(`[AUDIO DEBUG] Aggiornamento messaggio audio con ID ${lastAudioMessage.id}, chunks attuali: ${lastAudioMessage.audioChunks.length}/${lastAudioMessage.totalChunks}`);
+          
+          return prevMessages.map(msg => {
+            if (msg === lastAudioMessage) {
+              // Verifica se abbiamo già questo chunk (potrebbe essere un duplicato)
+              if (msg.audioChunks.length > chunkId) {
+                console.log(`[AUDIO DEBUG] Chunk ${chunkId} già presente nel messaggio, ignorato`);
+                return msg;
+              }
+              
+              const newAudioChunks = [...msg.audioChunks, chunkBase64];
+              console.log(`[AUDIO DEBUG] Aggiunto chunk ${chunkId}, ora abbiamo ${newAudioChunks.length}/${totalChunks} chunks`);
+              
+              const isComplete = isLastChunk || newAudioChunks.length === totalChunks;
+              
+              let audioUrl = msg.audioUrl;
+              if (isComplete && !audioUrl) {
+                console.log(`[AUDIO DEBUG] Audio completato con ${newAudioChunks.length} chunks, creazione URL`);
+                try {
+                  const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/webm');
+                  audioUrl = URL.createObjectURL(audioBlob);
+                  console.log('[AUDIO DEBUG] URL audio creato con successo');
+                } catch (error) {
+                  console.error('[AUDIO DEBUG] Errore nella creazione del blob audio:', error);
+                }
+              }
+              
+              return {
+                ...msg,
+                audioChunks: newAudioChunks,
+                receivedChunks: msg.receivedChunks + 1,
+                isComplete: isComplete,
+                audioUrl: audioUrl
+              };
+            }
+            return msg;
+          });
         });
-      });
+      }
     });
 
     // Aggiunge un messaggio di sistema quando un utente entra o esce

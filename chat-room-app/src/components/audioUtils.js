@@ -1,5 +1,5 @@
 // Dimensione massima per ciascun blocco audio in bytes
-export const MAX_CHUNK_SIZE = 5 * 1024; // 5KB
+export const MAX_CHUNK_SIZE = 30 * 1024; // 30KB invece di 5KB
 
 // Funzione per convertire base64 in Blob
 export const base64ToBlob = (base64, mimeType) => {
