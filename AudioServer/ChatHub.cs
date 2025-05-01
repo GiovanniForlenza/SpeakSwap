@@ -15,17 +15,17 @@ public class ChatHub : Hub
     private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _rooms =
         new ConcurrentDictionary<string, ConcurrentDictionary<string, string>>();
 
-    // Dizionario per memorizzare i chunk audio in arrivo: sessionKey -> List<AudioChunk>
-    private readonly ConcurrentDictionary<string, List<AudioChunk>> _pendingAudioChunks =
-        new ConcurrentDictionary<string, List<AudioChunk>>();
-
-    // Dizionario per tenere traccia delle sessioni audio attive per utente: userKey -> sessionKey
-    private readonly ConcurrentDictionary<string, string> _userAudioSessions =
+    // Dizionario per memorizzare le sessioni audio: userKey -> sessionId
+    private static readonly ConcurrentDictionary<string, string> _userAudioSessions =
         new ConcurrentDictionary<string, string>();
 
-    private readonly ConcurrentDictionary<string, long> _sessionCounters =
-        new ConcurrentDictionary<string, long>();
+    // Dizionario per memorizzare i chunk audio: sessionKeyFull -> List<AudioChunk>
+    private static readonly ConcurrentDictionary<string, List<AudioChunk>> _pendingAudioChunks =
+        new ConcurrentDictionary<string, List<AudioChunk>>();
 
+    // Contatori per generare ID sessione univoci
+    private static readonly ConcurrentDictionary<string, long> _sessionCounters =
+        new ConcurrentDictionary<string, long>();
 
     public ChatHub(ILogger<ChatHub> logger, TranslationService translationService, SpeechService speechService)
     {
@@ -237,42 +237,72 @@ public class ChatHub : Hub
                 // IMPORTANTE: Crea una chiave utente
                 string userKey = $"{userName}_{roomName}";
 
-                // Ottieni o crea un ID sessione per questa serie di chunk
+                // Dichiara le variabili per ID sessione e chiave completa
                 string sessionId;
+                string sessionKeyFull;
 
+                // --------- GESTIONE PRIMO CHUNK (ID = 0) ---------
                 if (chunkId == 0)
                 {
-                    // Se è il primo chunk, genera un nuovo ID sessione
-                    sessionId = _sessionCounters.AddOrUpdate(userKey, 1, (_, count) => count + 1).ToString();
+                    // Per il primo chunk, genera un nuovo ID sessione
+                    long counter = _sessionCounters.AddOrUpdate(userKey, 1, (_, count) => count + 1);
+                    sessionId = counter.ToString();
+
+                    // Memorizza l'ID sessione per questo utente
                     _userAudioSessions[userKey] = sessionId;
 
-                    // Crea una nuova lista di chunk
-                    _pendingAudioChunks[$"{userKey}_{sessionId}"] = new List<AudioChunk>();
-                    _logger.LogInformation($"Creata nuova sessione audio {userKey}_{sessionId} per il primo chunk");
+                    // Crea la chiave completa per la sessione
+                    sessionKeyFull = $"{userKey}_{sessionId}";
+
+                    // Crea una nuova lista per i chunk
+                    _pendingAudioChunks[sessionKeyFull] = new List<AudioChunk>();
+
+                    _logger.LogInformation($"Creata nuova sessione audio {sessionKeyFull} per il primo chunk");
                 }
+                // --------- GESTIONE CHUNK SUCCESSIVI (ID > 0) ---------
                 else
                 {
-                    // Per i chunk successivi, usa la sessione esistente
-                    if (!_userAudioSessions.TryGetValue(userKey, out sessionId))
+                    // Recupera l'ID sessione associato a questo utente
+                    bool hasSession = _userAudioSessions.TryGetValue(userKey, out sessionId);
+
+                    if (!hasSession)
                     {
-                        // Se la sessione non esiste (per qualche motivo), crea una nuova
-                        sessionId = _sessionCounters.AddOrUpdate(userKey, 1, (_, count) => count + 1).ToString();
+                        _logger.LogError($"ERRORE: Sessione non trovata per chunk {chunkId}. Questo non dovrebbe accadere con chunk in ordine.");
+
+                        // Come fallback, crea comunque una nuova sessione
+                        long counter = _sessionCounters.AddOrUpdate(userKey, 1, (_, count) => count + 1);
+                        sessionId = counter.ToString();
                         _userAudioSessions[userKey] = sessionId;
-                        _pendingAudioChunks[$"{userKey}_{sessionId}"] = new List<AudioChunk>();
-                        _logger.LogWarning($"Sessione non trovata per chunk {chunkId}. Creata nuova sessione {userKey}_{sessionId}");
+
+                        sessionKeyFull = $"{userKey}_{sessionId}";
+                        _pendingAudioChunks[sessionKeyFull] = new List<AudioChunk>();
+
+                        _logger.LogWarning($"Sessione non trovata per chunk {chunkId}. Creata nuova sessione {sessionKeyFull}");
+                    }
+                    else
+                    {
+                        // Usa la sessione esistente
+                        sessionKeyFull = $"{userKey}_{sessionId}";
+
+                        // Verifica se la collezione esiste per questa sessione
+                        if (!_pendingAudioChunks.ContainsKey(sessionKeyFull))
+                        {
+                            // Questo non dovrebbe accadere, ma in caso di errore crea una nuova collezione
+                            _pendingAudioChunks[sessionKeyFull] = new List<AudioChunk>();
+                            _logger.LogWarning($"Collezione mancante per sessione {sessionKeyFull}. Creata nuova collezione.");
+                        }
+
+                        _logger.LogInformation($"Usando sessione esistente {sessionKeyFull} per chunk {chunkId}");
                     }
                 }
 
-                // Chiave completa per la sessione
-                string sessionKey = $"{userKey}_{sessionId}";
-
-                // Aggiungi il chunk alla collezione corretta
-                if (_pendingAudioChunks.TryGetValue(sessionKey, out var chunks))
+                // --------- AGGIUNTA DEL CHUNK ALLA SESSIONE ---------
+                if (_pendingAudioChunks.TryGetValue(sessionKeyFull, out var chunks))
                 {
                     chunks.Add(new AudioChunk { ChunkId = chunkId, Data = chunk, IsLastChunk = isLastChunk });
-                    _logger.LogInformation($"Chunk {chunkId} aggiunto alla sessione {sessionKey}, ora contiene {chunks.Count}/{totalChunks} chunks");
+                    _logger.LogInformation($"Chunk {chunkId} aggiunto alla sessione {sessionKeyFull}, ora contiene {chunks.Count}/{totalChunks} chunks");
 
-                    // Invia il chunk agli altri utenti
+                    // --------- INVIO DEL CHUNK AGLI ALTRI UTENTI ---------
                     await Clients.GroupExcept(roomName, connectionId).SendAsync(
                         "ReceiveAudioChunk",
                         userName,
@@ -281,40 +311,68 @@ public class ChatHub : Hub
                         isLastChunk,
                         totalChunks);
 
-                    // Se è l'ultimo chunk o abbiamo tutti i chunk, elabora l'audio
+                    // --------- PROCESSAMENTO AUDIO SE COMPLETO ---------
+                    // Processa l'audio solo se:
+                    // 1. È l'ultimo chunk (isLastChunk = true) OPPURE
+                    // 2. Abbiamo ricevuto tutti i chunk previsti
                     if (isLastChunk || chunks.Count >= totalChunks)
                     {
-                        _logger.LogInformation($"Elaborazione audio avviata per {sessionKey}: {chunks.Count}/{totalChunks} chunks");
+                        _logger.LogInformation($"Elaborazione audio avviata per {sessionKeyFull}: {chunks.Count}/{totalChunks} chunks");
 
-                        // Ordina i chunk per ID
+                        // Ordina i chunk per ID per garantire l'ordine corretto
                         chunks.Sort((a, b) => a.ChunkId.CompareTo(b.ChunkId));
 
-                        // Combina in un unico blob
-                        string completeAudio = string.Join("", chunks.Select(c => c.Data));
-                        _logger.LogInformation($"Audio combinato con successo: {completeAudio.Length} caratteri");
+                        // Decodifica tutti i chunk e combina i byte
+                        byte[] combinedAudioBytes;
+                        try
+                        {
+                            var allBytes = new List<byte>();
+                            foreach (var audioChunk in chunks)
+                            {
+                                byte[] chunkBytes = Convert.FromBase64String(audioChunk.Data);
+                                allBytes.AddRange(chunkBytes);
+                            }
+
+                            combinedAudioBytes = allBytes.ToArray();
+                            _logger.LogInformation($"Audio combinato con successo: {combinedAudioBytes.Length} byte");
+                        }
+                        catch (FormatException ex)
+                        {
+                            _logger.LogError(ex, $"Errore nella decodifica base64 dei chunk audio per {sessionKeyFull}");
+                            return;
+                        }
+
+                        // Codifica in un'unica stringa base64 valida
+                        string completeAudioBase64 = Convert.ToBase64String(combinedAudioBytes);
+                        _logger.LogInformation($"Audio ricodificato in base64: {completeAudioBase64.Length} caratteri");
 
                         // Processa l'audio in un task separato
                         _ = Task.Run(async () =>
                         {
                             try
                             {
-                                await ProcessAudioForTranslation(userName, roomName, completeAudio, sourceLanguage);
+                                await ProcessAudioForTranslation(userName, roomName, completeAudioBase64, sourceLanguage);
 
                                 // Pulisci le risorse
-                                _pendingAudioChunks.TryRemove(sessionKey, out _);
+                                _pendingAudioChunks.TryRemove(sessionKeyFull, out _);
                                 _userAudioSessions.TryRemove(userKey, out _);
+                                _logger.LogInformation($"Risorse pulite per sessione {sessionKeyFull} dopo elaborazione completa");
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, $"Errore nell'elaborazione dell'audio per {sessionKey}");
+                                _logger.LogError(ex, $"Errore nell'elaborazione dell'audio per {sessionKeyFull}");
                             }
                         });
                     }
                 }
                 else
                 {
-                    _logger.LogError($"Impossibile trovare la collezione per la sessione {sessionKey}");
+                    _logger.LogError($"Impossibile trovare la collezione per la sessione {sessionKeyFull}");
                 }
+            }
+            else
+            {
+                _logger.LogWarning($"SendAudioChunk: Utente {userName} non trovato nelle connessioni");
             }
         }
         catch (Exception ex)

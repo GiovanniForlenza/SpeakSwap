@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libasound2-plugins \
     libpulse0 \
     libportaudio2 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 FROM mcr.microsoft.com/dotnet/sdk:6.0 AS build

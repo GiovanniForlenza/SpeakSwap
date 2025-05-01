@@ -137,7 +137,7 @@ const Chat = () => {
               if (isComplete && !audioUrl) {
                 console.log(`[AUDIO DEBUG] Audio completato con ${newAudioChunks.length} chunks, creazione URL`);
                 try {
-                  const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/webm');
+                  const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/wav');
                   audioUrl = URL.createObjectURL(audioBlob);
                   console.log('[AUDIO DEBUG] URL audio creato con successo');
                 } catch (error) {
@@ -187,7 +187,7 @@ const Chat = () => {
       
       // Crea un blob audio dai dati base64
       try {
-        const audioBlob = base64ToBlob(audioBase64, 'audio/webm');
+        const audioBlob = base64ToBlob(audioBase64, 'audio/wav');
         const audioUrl = URL.createObjectURL(audioBlob);
         
         // Messaggio audio tradotto alla lista dei messaggi
