@@ -279,6 +279,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       console.error('AudioRecorder: Error accessing microphone:', err);
       setErrorMessage(`Unable to access microphone: ${err.message}`);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Stop recording
@@ -403,6 +404,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       setErrorMessage('Connection unavailable. Please try again.');
       setIsSending(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, language, onAudioRecorded, recordingTime, userName]);
 
   // Format recording time

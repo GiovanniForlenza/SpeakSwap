@@ -6,6 +6,7 @@ public class ChatHub : Hub
     private readonly ILogger<ChatHub> _logger;
     private readonly TranslationService _translationService;
     private readonly SpeechService _speechService;
+    private readonly IHubContext<ChatHub> _hubContext;
 
     // Dizionario per memorizzare connessioni utente: connectionId -> (userName, roomName)
     private static readonly ConcurrentDictionary<string, UserConnection> _connections =
@@ -27,8 +28,9 @@ public class ChatHub : Hub
     private static readonly ConcurrentDictionary<string, long> _sessionCounters =
         new ConcurrentDictionary<string, long>();
 
-    public ChatHub(ILogger<ChatHub> logger, TranslationService translationService, SpeechService speechService)
+    public ChatHub(ILogger<ChatHub> logger, TranslationService translationService, SpeechService speechService, IHubContext<ChatHub> hubContext)
     {
+        _hubContext = hubContext;
         _logger = logger;
         _translationService = translationService;
         _speechService = speechService;
@@ -395,6 +397,10 @@ public class ChatHub : Hub
         {
             _logger.LogInformation($"INIZIO PROCESSAMENTO AUDIO per {userName} in stanza {roomName}, lunghezza base64: {audioBase64.Length} caratteri");
 
+            // Ottieni informazioni necessarie prima di iniziare operazioni asincrone lunghe
+            Dictionary<string, List<string>> connectionsByLanguage = GetConnectionsByLanguage(roomName, userName);
+            _logger.LogInformation($"Traduzione necessaria per {connectionsByLanguage.Count} lingue diverse");
+
             // 1. Converti audio in testo
             string recognizedText;
             try
@@ -428,12 +434,12 @@ public class ChatHub : Hub
 
             _logger.LogInformation($"Testo riconosciuto dall'audio di {userName}: \"{recognizedText}\"");
 
-            // 2. Ottieni le lingue target e le connessioni per ciascuna lingua
-            var connectionsByLanguage = GetConnectionsByLanguage(roomName, userName);
-            _logger.LogInformation($"Traduzione necessaria per {connectionsByLanguage.Count} lingue diverse");
-
             // 3. Per ogni lingua target, traduci e converti in audio
             bool anySuccess = false;
+
+            // Crea un elenco di task per elaborare tutte le lingue in parallelo
+            List<Task> translationTasks = new();
+
             foreach (var entry in connectionsByLanguage)
             {
                 var targetLanguage = entry.Key;
@@ -446,55 +452,67 @@ public class ChatHub : Hub
                     continue;
                 }
 
-                // Traduci il testo
-                string translatedText;
-                try
+                // Ogni traduzione viene eseguita in un task separato
+                translationTasks.Add(Task.Run(async () =>
                 {
-                    translatedText = await _translationService.TranslateTextAsync(recognizedText, sourceLanguage, targetLanguage);
-                    _logger.LogInformation($"Testo audio tradotto da {sourceLanguage} a {targetLanguage}: \"{translatedText}\"");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, $"Errore nella traduzione del testo audio da {sourceLanguage} a {targetLanguage}");
-                    continue;
-                }
-
-                // Converti il testo tradotto in audio
-                string translatedAudioBase64;
-                try
-                {
-                    translatedAudioBase64 = await _speechService.TextToSpeechAsync(translatedText, targetLanguage);
-                    _logger.LogInformation($"Testo tradotto convertito in audio per lingua {targetLanguage}, lunghezza audio: {translatedAudioBase64.Length} caratteri");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, $"Errore nella conversione testo-audio per lingua {targetLanguage}");
-                    continue;
-                }
-
-                // Invia l'audio tradotto agli utenti
-                try
-                {
-                    _logger.LogInformation($"Invio audio tradotto a {targetConnections.Count} utenti con lingua {targetLanguage}");
-
-                    foreach (var conn in targetConnections)
+                    // Traduci il testo
+                    string translatedText;
+                    try
                     {
-                        await Clients.Client(conn).SendAsync(
+                        translatedText = await _translationService.TranslateTextAsync(recognizedText, sourceLanguage, targetLanguage);
+                        _logger.LogInformation($"Testo audio tradotto da {sourceLanguage} a {targetLanguage}: \"{translatedText}\"");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Errore nella traduzione del testo audio da {sourceLanguage} a {targetLanguage}");
+                        return;
+                    }
+
+                    // Converti il testo tradotto in audio
+                    string translatedAudioBase64;
+                    try
+                    {
+                        translatedAudioBase64 = await _speechService.TextToSpeechAsync(translatedText, targetLanguage);
+                        _logger.LogInformation($"Testo tradotto convertito in audio per lingua {targetLanguage}, lunghezza audio: {translatedAudioBase64.Length} caratteri");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Errore nella conversione testo-audio per lingua {targetLanguage}");
+                        return;
+                    }
+
+                    if (string.IsNullOrEmpty(translatedAudioBase64))
+                    {
+                        _logger.LogWarning($"Nessun audio generato per la lingua {targetLanguage}");
+                        return;
+                    }
+
+                    // Invia l'audio tradotto agli utenti
+                    try
+                    {
+                        _logger.LogInformation($"Invio audio tradotto a {targetConnections.Count} utenti con lingua {targetLanguage}");
+
+                        // Ottieni l'oggetto IHubContext da ServiceProvider
+                        // Usare un oggetto IHubContext non soggetto a dispose
+                        await _hubContext.Clients.Clients(targetConnections).SendAsync(
                             "ReceiveTranslatedAudio",
                             userName,
                             translatedAudioBase64,
                             targetLanguage,
                             translatedText);
-                    }
 
-                    _logger.LogInformation($"Audio tradotto inviato con successo a utenti con lingua {targetLanguage}");
-                    anySuccess = true;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, $"Errore nell'invio dell'audio tradotto per lingua {targetLanguage}: {ex.Message}");
-                }
+                        _logger.LogInformation($"Audio tradotto inviato con successo a utenti con lingua {targetLanguage}");
+                        anySuccess = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Errore nell'invio dell'audio tradotto per lingua {targetLanguage}: {ex.Message}");
+                    }
+                }));
             }
+
+            // Attendi che tutte le traduzioni siano completate
+            await Task.WhenAll(translationTasks);
 
             // Se almeno una traduzione ha avuto successo, considera l'intero processo come riuscito
             if (anySuccess)

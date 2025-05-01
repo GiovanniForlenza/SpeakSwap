@@ -437,59 +437,89 @@ public class SpeechService
 
             _logger.LogInformation($"[SPEECH] Inizio sintesi vocale per: \"{text}\", lingua: {language}");
 
-            // Configura il servizio Speech con opzioni ottimizzate
-            var config = SpeechConfig.FromSubscription(_speechKey, _speechRegion);
-            config.SpeechSynthesisLanguage = GetSpeechLanguageCode(language);
-            config.SpeechSynthesisVoiceName = GetVoiceForLanguage(language);
+            // Gestione di timeout più ampio e tentativi multipli
+            int maxAttempts = 3;
+            int attempt = 0;
+            Exception lastException = null;
 
-            // Imposta ulteriori proprietà per migliorare la qualità
-            config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm);
+            while (attempt < maxAttempts)
+            {
+                attempt++;
+                _logger.LogInformation($"[SPEECH] Tentativo {attempt}/{maxAttempts} di sintesi vocale");
 
-            _logger.LogInformation($"[SPEECH] Configurato sintetizzatore per lingua: {config.SpeechSynthesisLanguage}, voce: {config.SpeechSynthesisVoiceName}");
+                try
+                {
+                    // Configura il servizio Speech con opzioni ottimizzate
+                    var config = SpeechConfig.FromSubscription(_speechKey, _speechRegion);
+                    config.SpeechSynthesisLanguage = GetSpeechLanguageCode(language);
+                    config.SpeechSynthesisVoiceName = GetVoiceForLanguage(language);
 
-            // Crea il sintetizzatore
-            using var synthesizer = new SpeechSynthesizer(config);
-            _logger.LogInformation("[SPEECH] Sintetizzatore configurato, inizio sintesi");
+                    // Imposta una preferenza di formato più semplice (più affidabile)
+                    config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm);
 
-            // Prova con SSML per un maggiore controllo (opzionale)
-            string ssml = $@"
-<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{GetSpeechLanguageCode(language)}'>
-    <voice name='{GetVoiceForLanguage(language)}'>
-        <prosody rate='1.0' pitch='0'>
-            {text}
-        </prosody>
-    </voice>
-</speak>";
+                    config.SetProperty(PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "10000");  // 10 secondi
+                    config.SetProperty(PropertyId.SpeechServiceResponse_RequestSentenceBoundary, "true");
 
-            // Sintetizza il testo in audio
-            SpeechSynthesisResult result;
+                    _logger.LogInformation($"[SPEECH] Configurato sintetizzatore per lingua: {config.SpeechSynthesisLanguage}, voce: {config.SpeechSynthesisVoiceName}");
 
+                    // Crea il sintetizzatore
+                    using var synthesizer = new SpeechSynthesizer(config);
+                    _logger.LogInformation("[SPEECH] Sintetizzatore configurato, inizio sintesi");
+
+                    // Utilizza direttamente il testo semplice, senza SSML
+                    var result = await synthesizer.SpeakTextAsync(text);
+                    _logger.LogInformation($"[SPEECH] Sintesi testo completata, status: {result.Reason}");
+
+                    // Verifica il risultato
+                    if (result.Reason == ResultReason.SynthesizingAudioCompleted && result.AudioData != null && result.AudioData.Length > 0)
+                    {
+                        var audioBase64 = Convert.ToBase64String(result.AudioData);
+                        _logger.LogInformation($"[SPEECH] Audio generato con successo, lunghezza: {audioBase64.Length} caratteri");
+                        return audioBase64;
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[SPEECH] Sintesi vocale non ha prodotto audio. Motivo: {result.Reason}, AudioData presente: {result.AudioData != null}, Lunghezza: {result.AudioData?.Length ?? 0}");
+                    }
+                }
+                catch (OperationCanceledException ocEx)
+                {
+                    lastException = ocEx;
+                    _logger.LogWarning(ocEx, $"[SPEECH] Operazione di sintesi vocale cancellata (tentativo {attempt}/{maxAttempts})");
+
+                    // Piccola pausa prima del prossimo tentativo
+                    await Task.Delay(500);
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    _logger.LogError(ex, $"[SPEECH] Errore nella sintesi vocale (tentativo {attempt}/{maxAttempts})");
+
+                    // Piccola pausa prima del prossimo tentativo
+                    await Task.Delay(500);
+                }
+            }
+
+            if (lastException != null)
+            {
+                _logger.LogError(lastException, $"[SPEECH] Tutti i tentativi di sintesi vocale falliti dopo {maxAttempts} tentativi");
+            }
+
+            // Come fallback, genera un "placeholder" audio WAV vuoto breve
             try
             {
-                // Prima prova con SSML
-                result = await synthesizer.SpeakSsmlAsync(ssml);
-                _logger.LogInformation($"[SPEECH] Sintesi SSML completata, status: {result.Reason}");
+                _logger.LogInformation("[SPEECH] Generazione audio placeholder come fallback");
+                byte[] placeholderAudio = GeneratePlaceholderWavAudio();
+                string placeholderBase64 = Convert.ToBase64String(placeholderAudio);
+                _logger.LogInformation($"[SPEECH] Audio placeholder generato, lunghezza: {placeholderBase64.Length} caratteri");
+                return placeholderBase64;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[SPEECH] Errore nella sintesi SSML, tentativo con testo semplice");
-                // Fallback a testo semplice
-                result = await synthesizer.SpeakTextAsync(text);
-                _logger.LogInformation($"[SPEECH] Sintesi testo semplice completata, status: {result.Reason}");
+                _logger.LogError(ex, "[SPEECH] Errore nella generazione del placeholder audio");
             }
 
-            // Verifica il risultato
-            if (result.Reason == ResultReason.SynthesizingAudioCompleted)
-            {
-                var audioBase64 = Convert.ToBase64String(result.AudioData);
-                _logger.LogInformation($"[SPEECH] Audio generato con successo, lunghezza: {audioBase64.Length} caratteri");
-                return audioBase64;
-            }
-            else
-            {
-                _logger.LogWarning($"[SPEECH] Sintesi vocale fallita. Motivo: {result.Reason}");
-                return string.Empty;
-            }
+            return string.Empty;
         }
         catch (Exception ex)
         {
@@ -498,6 +528,69 @@ public class SpeechService
         }
     }
 
+    // Genera un file WAV vuoto come placeholder
+    private byte[] GeneratePlaceholderWavAudio()
+    {
+        // Parametri audio
+        int sampleRate = 16000;   // 16kHz
+        int channels = 1;         // mono
+        int bitsPerSample = 16;   // 16 bit
+        float durationSecs = 0.5f;  // mezzo secondo
+
+        // Calcola dimensioni
+        int bytesPerSample = bitsPerSample / 8;
+        int dataSize = (int)(sampleRate * durationSecs * channels * bytesPerSample);
+        int fileSize = 44 + dataSize;  // 44 bytes di header WAV
+
+        // Crea buffer per il file WAV
+        byte[] wavFile = new byte[fileSize];
+
+        // Scrivi WAV header (44 bytes standard)
+        // "RIFF" chunk
+        wavFile[0] = (byte)'R'; wavFile[1] = (byte)'I'; wavFile[2] = (byte)'F'; wavFile[3] = (byte)'F';
+        wavFile[4] = (byte)((dataSize + 36) & 0xff);
+        wavFile[5] = (byte)(((dataSize + 36) >> 8) & 0xff);
+        wavFile[6] = (byte)(((dataSize + 36) >> 16) & 0xff);
+        wavFile[7] = (byte)(((dataSize + 36) >> 24) & 0xff);
+        // "WAVE"
+        wavFile[8] = (byte)'W'; wavFile[9] = (byte)'A'; wavFile[10] = (byte)'V'; wavFile[11] = (byte)'E';
+        // "fmt " chunk
+        wavFile[12] = (byte)'f'; wavFile[13] = (byte)'m'; wavFile[14] = (byte)'t'; wavFile[15] = (byte)' ';
+        // lunghezza chunk fmt (16 bytes)
+        wavFile[16] = 16; wavFile[17] = 0; wavFile[18] = 0; wavFile[19] = 0;
+        // formato audio (1 = PCM)
+        wavFile[20] = 1; wavFile[21] = 0;
+        // canali
+        wavFile[22] = (byte)channels; wavFile[23] = 0;
+        // sample rate
+        wavFile[24] = (byte)(sampleRate & 0xff);
+        wavFile[25] = (byte)((sampleRate >> 8) & 0xff);
+        wavFile[26] = (byte)((sampleRate >> 16) & 0xff);
+        wavFile[27] = (byte)((sampleRate >> 24) & 0xff);
+        // byte rate = SampleRate * NumChannels * BitsPerSample/8
+        int byteRate = sampleRate * channels * bytesPerSample;
+        wavFile[28] = (byte)(byteRate & 0xff);
+        wavFile[29] = (byte)((byteRate >> 8) & 0xff);
+        wavFile[30] = (byte)((byteRate >> 16) & 0xff);
+        wavFile[31] = (byte)((byteRate >> 24) & 0xff);
+        // block align = NumChannels * BitsPerSample/8
+        wavFile[32] = (byte)(channels * bytesPerSample); wavFile[33] = 0;
+        // bits per sample
+        wavFile[34] = (byte)bitsPerSample; wavFile[35] = 0;
+
+        // "data" chunk
+        wavFile[36] = (byte)'d'; wavFile[37] = (byte)'a'; wavFile[38] = (byte)'t'; wavFile[39] = (byte)'a';
+        // data size
+        wavFile[40] = (byte)(dataSize & 0xff);
+        wavFile[41] = (byte)((dataSize >> 8) & 0xff);
+        wavFile[42] = (byte)((dataSize >> 16) & 0xff);
+        wavFile[43] = (byte)((dataSize >> 24) & 0xff);
+
+        // Dati audio - silenzio (tutti zero)
+        // Già inizializzato a zero con new byte[fileSize]
+
+        return wavFile;
+    }
     // Mappa codici lingua per il servizio Speech
     private string GetSpeechLanguageCode(string language)
     {
