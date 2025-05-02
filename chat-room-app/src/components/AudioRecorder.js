@@ -335,6 +335,9 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     const audioUrl = URL.createObjectURL(audioBlob);
     setAudioURL(audioUrl);
 
+    const currentConnectionState = connection?.state;
+    console.log(`AudioRecorder: Current connection state before sending: ${currentConnectionState}`);
+    
     if (connection && connection.state === 'Connected') {
       setIsSending(true);
 
@@ -369,16 +372,21 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
             console.error(`AudioRecorder: Error sending chunk ${i}:`, chunkErr);
             
             // Attempt reconnection if needed
-            if (connection.state !== 'Connected') {
+            if (!connection || connection.state !== 'Connected') {
+              console.log('AudioRecorder: Connection not in Connected state, attempting to reconnect...');
               try {
-                await connection.start();
-                console.log('AudioRecorder: Reconnection successful during chunk sending');
-                i--; // Retry the same chunk
-                continue;
-              } catch (reconnectErr) {
-                console.error('AudioRecorder: Error during reconnection:', reconnectErr);
-                setErrorMessage('Connection error. Please try again.');
-                break;
+                // Se non c'è connessione o non è connesso, prova a riconnetterti
+                if (connection) {
+                  await connection.start();
+                  console.log('AudioRecorder: Connection reestablished!');
+                } else {
+                  throw new Error('No connection object available');
+                }
+              } catch (err) {
+                console.error('AudioRecorder: Failed to reconnect:', err);
+                setErrorMessage('Connection unavailable. Please try again.');
+                setIsSending(false);
+                return;
               }
             } else {
               setErrorMessage(`Error sending audio. Please try again.`);
