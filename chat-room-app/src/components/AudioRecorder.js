@@ -15,172 +15,6 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
   const streamRef = useRef(null);
   const timerRef = useRef(null);
 
-  // Funzione per convertire WebM a WAV
-  const convertWebMToWav = async (webmBlob) => {
-    try {
-      console.log(`AudioRecorder: Conversione da ${webmBlob.type} a WAV`);
-      
-      // Crea un elemento audio per la conversione
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000 // Imposta esplicitamente a 16kHz
-      });
-      
-      // Converti il blob in un ArrayBuffer
-      const arrayBuffer = await webmBlob.arrayBuffer();
-      
-      // Decodifica l'audio
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      
-      // Prepara per la conversione in WAV
-      const numberOfChannels = 1; // Mono
-      const sampleRate = 16000;    // 16kHz
-      const bitsPerSample = 16;    // 16 bit
-      
-      // Crea un buffer per il formato WAV
-      const wavBuffer = createWavBuffer(audioBuffer, {
-        sampleRate: sampleRate,
-        numberOfChannels: numberOfChannels,
-        bitsPerSample: bitsPerSample
-      });
-      
-      // Crea un nuovo blob WAV
-      const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-      
-      console.log(`AudioRecorder: Conversione completata. Dimensione WebM: ${webmBlob.size} bytes, WAV: ${wavBlob.size} bytes`);
-      return wavBlob;
-    } catch (err) {
-      console.error('AudioRecorder: Errore nella conversione a WAV:', err);
-      return webmBlob; // Fallback all'originale
-    }
-  };
-
-  // Funzione per creare un buffer WAV con header corretto
-  const createWavBuffer = (audioBuffer, options = {}) => {
-    const numChannels = options.numberOfChannels || audioBuffer.numberOfChannels;
-    const sampleRate = options.sampleRate || audioBuffer.sampleRate;
-    const bitsPerSample = options.bitsPerSample || 16;
-    const bytesPerSample = bitsPerSample / 8;
-    
-    // Se necessario, ricampiona l'audio
-    let audioData;
-    
-    if (audioBuffer.sampleRate !== sampleRate) {
-      audioData = resampleAudio(audioBuffer, sampleRate, numChannels);
-    } else {
-      // Estrai i dati
-      audioData = [];
-      for (let channel = 0; channel < numChannels; channel++) {
-        if (channel < audioBuffer.numberOfChannels) {
-          audioData.push(audioBuffer.getChannelData(channel));
-        } else {
-          // Se richiediamo più canali di quelli disponibili, aggiungi silenzio
-          audioData.push(new Float32Array(audioBuffer.length).fill(0));
-        }
-      }
-    }
-    
-    // Calcola la lunghezza dei dati audio (in byte)
-    const dataLength = audioData[0].length * numChannels * bytesPerSample;
-    
-    // Crea il buffer per il file WAV (header + data)
-    const buffer = new ArrayBuffer(44 + dataLength);
-    const view = new DataView(buffer);
-    
-    // Scrivi l'header WAV
-    // "RIFF" chunk descriptor
-    writeString(view, 0, 'RIFF');
-    view.setUint32(4, 36 + dataLength, true);
-    writeString(view, 8, 'WAVE');
-    
-    // "fmt " sub-chunk
-    writeString(view, 12, 'fmt ');
-    view.setUint32(16, 16, true); // Lunghezza sub-chunk
-    view.setUint16(20, 1, true);  // AudioFormat (1 = PCM)
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * numChannels * bytesPerSample, true); // ByteRate
-    view.setUint16(32, numChannels * bytesPerSample, true); // BlockAlign
-    view.setUint16(34, bitsPerSample, true);
-    
-    // "data" sub-chunk
-    writeString(view, 36, 'data');
-    view.setUint32(40, dataLength, true);
-    
-    // Scrivi i dati audio (interleaved)
-    let offset = 44;
-    if (bitsPerSample === 16) {
-      for (let i = 0; i < audioData[0].length; i++) {
-        for (let channel = 0; channel < numChannels; channel++) {
-          const sample = Math.max(-1, Math.min(1, audioData[channel][i]));
-          const value = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-          view.setInt16(offset, value, true);
-          offset += 2;
-        }
-      }
-    } else if (bitsPerSample === 32) {
-      for (let i = 0; i < audioData[0].length; i++) {
-        for (let channel = 0; channel < numChannels; channel++) {
-          const sample = Math.max(-1, Math.min(1, audioData[channel][i]));
-          view.setFloat32(offset, sample, true);
-          offset += 4;
-        }
-      }
-    } else if (bitsPerSample === 8) {
-      for (let i = 0; i < audioData[0].length; i++) {
-        for (let channel = 0; channel < numChannels; channel++) {
-          const sample = Math.max(-1, Math.min(1, audioData[channel][i]));
-          const value = (sample + 1) * 128; // 8 bit è unsigned [0, 255]
-          view.setUint8(offset, value);
-          offset += 1;
-        }
-      }
-    }
-    
-    return buffer;
-  };
-
-  // Funzione per ricampionare l'audio alla frequenza target
-  const resampleAudio = (audioBuffer, targetSampleRate, numChannels) => {
-    const originalSampleRate = audioBuffer.sampleRate;
-    const ratio = targetSampleRate / originalSampleRate;
-    const newLength = Math.round(audioBuffer.length * ratio);
-    
-    const result = [];
-    
-    for (let channel = 0; channel < numChannels; channel++) {
-      const data = new Float32Array(newLength);
-      
-      // Estrai i dati del canale se disponibile
-      const originalData = channel < audioBuffer.numberOfChannels 
-        ? audioBuffer.getChannelData(channel) 
-        : new Float32Array(audioBuffer.length).fill(0);
-      
-      // Ricampionamento lineare semplice
-      for (let i = 0; i < newLength; i++) {
-        const position = i / ratio;
-        const index = Math.floor(position);
-        const alpha = position - index;
-        
-        if (index + 1 < originalData.length) {
-          data[i] = (1 - alpha) * originalData[index] + alpha * originalData[index + 1];
-        } else {
-          data[i] = originalData[index];
-        }
-      }
-      
-      result.push(data);
-    }
-    
-    return result;
-  };
-
-  // Funzione per scrivere una stringa in un DataView
-  const writeString = (view, offset, string) => {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  };
-
   // Timer for recording
   useEffect(() => {
     if (isRecording) {
@@ -209,6 +43,23 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
   // Start recording
   const startRecording = useCallback(async () => {
     try {
+      // Log delle informazioni sul browser
+      console.log(`AudioRecorder: Navigator info:`, {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        vendor: navigator.vendor
+      });
+      
+      // Verifica i formati supportati
+      let supportedTypes = [];
+      ['audio/wav', 'audio/webm', 'audio/webm;codecs=opus', 'audio/ogg'].forEach(type => {
+        supportedTypes.push({
+          type,
+          supported: MediaRecorder.isTypeSupported(type)
+        });
+      });
+      console.log('AudioRecorder: Supported types:', supportedTypes);
+
       setErrorMessage('');
       setRecordingTime(0);
       setAudioURL('');
@@ -229,6 +80,8 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       const options = [
         { mimeType: 'audio/wav', audioBitsPerSecond: 256000 },
         { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 32000 },
+        { mimeType: 'audio/webm', audioBitsPerSecond: 32000 },
+        { mimeType: 'audio/ogg', audioBitsPerSecond: 32000 }
       ];
 
       let mediaRecorder;
@@ -320,23 +173,14 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       return;
     }
 
-    // Converti in WAV se necessario
-    let audioBlob = recordedBlob;
-    if (recordedBlob.type.includes('webm')) {
-      try {
-        audioBlob = await convertWebMToWav(recordedBlob);
-        console.log(`AudioRecorder: Convertito da ${recordedBlob.type} a WAV, nuova dimensione: ${audioBlob.size} bytes`);
-      } catch (err) {
-        console.error('AudioRecorder: Errore nella conversione a WAV:', err);
-        // Continua con il blob originale
-      }
-    }
-
+    // Utilizziamo direttamente il blob registrato senza conversione
+    // Il server gestirà la conversione se necessario
+    const audioBlob = recordedBlob;
     const audioUrl = URL.createObjectURL(audioBlob);
     setAudioURL(audioUrl);
 
     const currentConnectionState = connection?.state;
-    console.log(`AudioRecorder: Connection state immediately before sending: ${currentConnectionState}`);
+    console.log(`AudioRecorder: Connection state before sending: ${currentConnectionState}`);
 
     // Tenta di riconnettersi se necessario
     if (!connection) {
@@ -417,7 +261,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
           
           // Short pause between chunks to avoid overloading
           if (i < base64Chunks.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 300)); // Aumentato a 300ms
           }
         }
 
@@ -434,7 +278,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       setIsSending(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, language, onAudioRecorded, recordingTime, userName]);
+  }, [connection, language, onAudioRecorded, userName]);
 
   // Format recording time
   const formatTime = (seconds) => {

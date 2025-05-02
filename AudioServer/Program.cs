@@ -16,7 +16,7 @@ builder.Logging.SetMinimumLevel(LogLevel.Information);
 builder.Services.AddSignalR(options =>
 {
     options.EnableDetailedErrors = true;
-    options.MaximumReceiveMessageSize = 5 * 1024 * 1024; // 5MB
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
     options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
 })
