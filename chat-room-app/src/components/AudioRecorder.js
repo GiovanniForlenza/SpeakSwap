@@ -301,7 +301,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
   const handleRecordingStopped = useCallback(async () => {
     console.log(`AudioRecorder: Processing ${audioChunksRef.current.length} audio chunks`);
 
-    if (recordingTime < 1 || audioChunksRef.current.length === 0) {
+    if (audioChunksRef.current.length === 0) {
       console.warn('AudioRecorder: Recording too short, ignored');
       setIsSending(false);
       return;
