@@ -336,9 +336,30 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     setAudioURL(audioUrl);
 
     const currentConnectionState = connection?.state;
-    console.log(`AudioRecorder: Current connection state before sending: ${currentConnectionState}`);
-    
-    if (connection && connection.state === 'Connected') {
+    console.log(`AudioRecorder: Connection state immediately before sending: ${currentConnectionState}`);
+
+    // Tenta di riconnettersi se necessario
+    if (!connection) {
+      console.error('AudioRecorder: No connection object available');
+      setErrorMessage('Connection unavailable. Please try again.');
+      setIsSending(false);
+      return;
+    }
+
+    if (connection.state !== 'Connected') {
+      console.log(`AudioRecorder: Connection not Connected (${connection.state}), attempting to reconnect...`);
+      try {
+        await connection.start();
+        console.log('AudioRecorder: Connection reestablished!');
+      } catch (reconnectErr) {
+        console.error('AudioRecorder: Failed to reconnect:', reconnectErr);
+        setErrorMessage('Connection unavailable. Please try again.');
+        setIsSending(false);
+        return;
+      }
+    }
+
+    if (connection.state === 'Connected') {
       setIsSending(true);
 
       try {
