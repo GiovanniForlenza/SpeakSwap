@@ -1,21 +1,36 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSignalRConnection } from './SignalRConnectionProvider';
-import { MAX_CHUNK_SIZE, splitBlobIntoChunks } from './audioUtils';
+import { splitBlobIntoChunks } from './audioUtils';
+
+// Ridotto per maggiore affidabilità
+const MAX_CHUNK_SIZE = 2 * 1024; // 2KB per chunk
 
 const AudioRecorder = ({ userName, onAudioRecorded }) => {
-  const { connection, language } = useSignalRConnection();
+  const { connection, connectionStatus, language } = useSignalRConnection();
   const [isRecording, setIsRecording] = useState(false);
   const [audioURL, setAudioURL] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
+  const [connectionReady, setConnectionReady] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
+  
+  // Monitoraggio della connessione
+  useEffect(() => {
+    if (connection && connectionStatus === 'Connected') {
+      console.log("SignalR connection ready:", connectionStatus);
+      setConnectionReady(true);
+    } else {
+      console.log("SignalR connection not ready:", connectionStatus);
+      setConnectionReady(false);
+    }
+  }, [connection, connectionStatus]);
 
-  // Timer for recording
+  // Timer per la registrazione
   useEffect(() => {
     if (isRecording) {
       timerRef.current = setInterval(() => {
@@ -28,7 +43,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     return () => clearInterval(timerRef.current);
   }, [isRecording]);
 
-  // Cleanup on unmount
+  // Pulizia quando il componente viene smontato
   useEffect(() => {
     return () => {
       if (streamRef.current) {
@@ -40,7 +55,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     };
   }, [audioURL]);
 
-  // Start recording
+  // Avvia la registrazione
   const startRecording = useCallback(async () => {
     try {
       // Log delle informazioni sul browser
@@ -77,11 +92,11 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
 
       streamRef.current = stream;
 
+      // Ridotte le opzioni per semplificare
       const options = [
-        { mimeType: 'audio/wav', audioBitsPerSecond: 256000 },
-        { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 32000 },
-        { mimeType: 'audio/webm', audioBitsPerSecond: 32000 },
-        { mimeType: 'audio/ogg', audioBitsPerSecond: 32000 }
+        { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 16000 },
+        { mimeType: 'audio/webm', audioBitsPerSecond: 16000 },
+        { mimeType: 'audio/ogg', audioBitsPerSecond: 16000 }
       ];
 
       let mediaRecorder;
@@ -125,7 +140,8 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
         stopRecording();
       };
 
-      mediaRecorder.start(1000);
+      // Registra dati ogni 500ms invece che 1000ms
+      mediaRecorder.start(500);
       setIsRecording(true);
       console.log('AudioRecorder: Recording started');
     } catch (err) {
@@ -135,7 +151,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Stop recording
+  // Ferma la registrazione
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
       console.log('AudioRecorder: Stop recording requested');
@@ -150,7 +166,43 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     }
   }, [isRecording]);
 
-  // Handle recording stopped
+  // Verifica lo stato della connessione con tentativi
+  const ensureConnection = useCallback(async (maxAttempts = 3) => {
+    console.log(`AudioRecorder: Verifica connessione (stato: ${connectionStatus})`);
+    
+    if (!connection) {
+      console.error('AudioRecorder: No connection object available');
+      return false;
+    }
+    
+    if (connection.state === 'Connected') {
+      return true;
+    }
+    
+    // Tentativi di riconnessione
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      attempts++;
+      console.log(`AudioRecorder: Tentativo di riconnessione ${attempts}/${maxAttempts}`);
+      
+      try {
+        await connection.start();
+        console.log('AudioRecorder: Connection reestablished!');
+        return true;
+      } catch (err) {
+        console.error(`AudioRecorder: Failed to reconnect (attempt ${attempts}/${maxAttempts}):`, err);
+        
+        // Pausa prima del prossimo tentativo
+        if (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }
+    
+    return false;
+  }, [connection, connectionStatus]);
+
+  // Gestisce la registrazione fermata
   const handleRecordingStopped = useCallback(async () => {
     console.log(`AudioRecorder: Processing ${audioChunksRef.current.length} audio chunks`);
 
@@ -179,50 +231,55 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     const audioUrl = URL.createObjectURL(audioBlob);
     setAudioURL(audioUrl);
 
-    const currentConnectionState = connection?.state;
-    console.log(`AudioRecorder: Connection state before sending: ${currentConnectionState}`);
-
-    // Tenta di riconnettersi se necessario
-    if (!connection) {
-      console.error('AudioRecorder: No connection object available');
-      setErrorMessage('Connection unavailable. Please try again.');
+    // Verifica lo stato della connessione prima di iniziare
+    const isConnected = await ensureConnection(3);
+    if (!isConnected) {
+      setErrorMessage('Cannot establish connection to the server. Please reload the page and try again.');
       setIsSending(false);
       return;
     }
 
-    if (connection.state !== 'Connected') {
-      console.log(`AudioRecorder: Connection not Connected (${connection.state}), attempting to reconnect...`);
-      try {
-        await connection.start();
-        console.log('AudioRecorder: Connection reestablished!');
-      } catch (reconnectErr) {
-        console.error('AudioRecorder: Failed to reconnect:', reconnectErr);
-        setErrorMessage('Connection unavailable. Please try again.');
-        setIsSending(false);
-        return;
+    setIsSending(true);
+
+    try {
+      // Dividi l'audio in chunk più piccoli
+      const base64Chunks = await splitBlobIntoChunks(audioBlob, MAX_CHUNK_SIZE);
+      console.log(`AudioRecorder: Audio split into ${base64Chunks.length} chunks`);
+
+      if (base64Chunks.length === 0) {
+        throw new Error('No valid audio chunks generated');
       }
-    }
 
-    if (connection.state === 'Connected') {
-      setIsSending(true);
+      // Invia il messaggio locale anche se l'invio al server fallisce
+      if (onAudioRecorded) {
+        onAudioRecorded(audioUrl, base64Chunks);
+      }
 
-      try {
-        const base64Chunks = await splitBlobIntoChunks(audioBlob, MAX_CHUNK_SIZE);
-        console.log(`AudioRecorder: Audio split into ${base64Chunks.length} chunks`);
-
-        if (base64Chunks.length === 0) {
-          throw new Error('No valid audio chunks generated');
-        }
-
-        if (onAudioRecorded) {
-          onAudioRecorded(audioUrl, base64Chunks);
-        }
-
-        for (let i = 0; i < base64Chunks.length; i++) {
-          const isLastChunk = i === base64Chunks.length - 1;
-          console.log(`AudioRecorder: Sending chunk ${i}/${base64Chunks.length - 1}, isLastChunk=${isLastChunk}`);
+      // Invia i chunk con retry
+      let successCount = 0;
+      for (let i = 0; i < base64Chunks.length; i++) {
+        const isLastChunk = i === base64Chunks.length - 1;
+        console.log(`AudioRecorder: Sending chunk ${i}/${base64Chunks.length - 1}, isLastChunk=${isLastChunk}`);
+        
+        // Implementa retry per ogni chunk
+        let chunkSuccess = false;
+        let chunkAttempts = 0;
+        const maxChunkAttempts = 3;
+        
+        while (!chunkSuccess && chunkAttempts < maxChunkAttempts) {
+          chunkAttempts++;
           
           try {
+            // Verifica che la connessione sia ancora valida prima di ogni invio
+            if (connection.state !== 'Connected') {
+              console.log(`AudioRecorder: Connection not Connected before chunk ${i}, trying to reconnect...`);
+              const reconnected = await ensureConnection(2);
+              if (!reconnected) {
+                throw new Error(`Failed to reconnect for chunk ${i}`);
+              }
+            }
+            
+            // Invia il chunk
             await connection.invoke(
               'SendAudioChunk',
               userName,
@@ -232,55 +289,52 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
               base64Chunks.length,
               language
             );
-            console.log(`AudioRecorder: Chunk ${i + 1}/${base64Chunks.length} sent successfully`);
-          } catch (chunkErr) {
-            console.error(`AudioRecorder: Error sending chunk ${i}:`, chunkErr);
             
-            // Attempt reconnection if needed
-            if (!connection || connection.state !== 'Connected') {
-              console.log('AudioRecorder: Connection not in Connected state, attempting to reconnect...');
-              try {
-                // Se non c'è connessione o non è connesso, prova a riconnetterti
-                if (connection) {
-                  await connection.start();
-                  console.log('AudioRecorder: Connection reestablished!');
-                } else {
-                  throw new Error('No connection object available');
-                }
-              } catch (err) {
-                console.error('AudioRecorder: Failed to reconnect:', err);
-                setErrorMessage('Connection unavailable. Please try again.');
-                setIsSending(false);
-                return;
-              }
-            } else {
-              setErrorMessage(`Error sending audio. Please try again.`);
+            console.log(`AudioRecorder: Chunk ${i + 1}/${base64Chunks.length} sent successfully (attempt ${chunkAttempts})`);
+            chunkSuccess = true;
+            successCount++;
+          } catch (chunkErr) {
+            console.error(`AudioRecorder: Error sending chunk ${i} (attempt ${chunkAttempts}/${maxChunkAttempts}):`, chunkErr);
+            
+            if (chunkAttempts >= maxChunkAttempts) {
+              console.error(`AudioRecorder: Failed to send chunk ${i} after ${maxChunkAttempts} attempts`);
               break;
             }
-          }
-          
-          // Short pause between chunks to avoid overloading
-          if (i < base64Chunks.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 300)); // Aumentato a 300ms
+            
+            // Pausa prima di riprovare
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
-
-        console.log('AudioRecorder: Audio sent successfully');
-      } catch (err) {
-        console.error('AudioRecorder: Error sending audio:', err);
-        setErrorMessage('Error sending audio. Please try again.');
-      } finally {
-        setIsSending(false);
+        
+        // Se questo chunk ha fallito dopo tutti i tentativi, interrompi l'invio
+        if (!chunkSuccess) {
+          setErrorMessage(`Error sending audio segment ${i+1}/${base64Chunks.length}. Please try again.`);
+          break;
+        }
+        
+        // Pausa tra chunks per evitare di sovraccaricare il server
+        if (i < base64Chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
-    } else {
-      console.error('AudioRecorder: Connection unavailable');
-      setErrorMessage('Connection unavailable. Please try again.');
+
+      if (successCount === base64Chunks.length) {
+        console.log('AudioRecorder: All audio chunks sent successfully');
+      } else {
+        console.log(`AudioRecorder: Sent ${successCount}/${base64Chunks.length} chunks successfully`);
+        if (!errorMessage) {
+          setErrorMessage(`Sent ${successCount}/${base64Chunks.length} audio segments. Recording may be incomplete.`);
+        }
+      }
+    } catch (err) {
+      console.error('AudioRecorder: Error sending audio:', err);
+      setErrorMessage('Error sending audio. Please try again.');
+    } finally {
       setIsSending(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, language, onAudioRecorded, userName]);
+  }, [connection, ensureConnection, errorMessage, language, onAudioRecorded, userName]);
 
-  // Format recording time
+  // Formatta il tempo di registrazione
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -322,20 +376,42 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
           <button
             onClick={startRecording}
             style={{
-              backgroundColor: '#4CAF50',
+              backgroundColor: connectionReady ? '#4CAF50' : '#cccccc',
               color: 'white',
               border: 'none',
               borderRadius: '4px',
               padding: '8px 16px',
-              cursor: 'pointer',
+              cursor: connectionReady ? 'pointer' : 'not-allowed',
             }}
-            disabled={isSending}
+            disabled={isSending || !connectionReady}
             aria-label="Start recording"
+            title={!connectionReady ? 'Waiting for connection...' : ''}
           >
             {isSending ? 'Sending...' : 'Record Audio'}
           </button>
         )}
       </div>
+
+      {/* Indicatore di stato connessione */}
+      {!connectionReady && !isRecording && (
+        <div style={{ 
+          color: '#ff9800', 
+          fontSize: '12px', 
+          marginBottom: '10px',
+          display: 'flex',
+          alignItems: 'center'
+        }}>
+          <div style={{
+            width: '8px',
+            height: '8px',
+            backgroundColor: '#ff9800',
+            borderRadius: '50%',
+            marginRight: '5px',
+            animation: 'pulse 1s infinite'
+          }}></div>
+          Connection to server not ready. Please wait...
+        </div>
+      )}
 
       {audioURL && !isRecording && (
         <div style={{ marginTop: '10px' }}>
