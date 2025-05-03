@@ -18,12 +18,14 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
   const audioChunksRef = useRef([]);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
-  
+  const connectionRef = useRef(null); // ref per memorizzare la connessione
+
   // Monitoraggio della connessione
   useEffect(() => {
     if (connection && connectionStatus === 'Connected') {
       console.log("SignalR connection ready:", connectionStatus);
       setConnectionReady(true);
+      connectionRef.current = connection;
     } else {
       console.log("SignalR connection not ready:", connectionStatus);
       setConnectionReady(false);
@@ -148,7 +150,6 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       console.error('AudioRecorder: Error accessing microphone:', err);
       setErrorMessage(`Unable to access microphone: ${err.message}`);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Ferma la registrazione
@@ -170,12 +171,15 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
   const ensureConnection = useCallback(async (maxAttempts = 3) => {
     console.log(`AudioRecorder: Verifica connessione (stato: ${connectionStatus})`);
     
-    if (!connection) {
+    // Usa la referenza alla connessione invece di usare direttamente connection
+    const currentConnection = connectionRef.current;
+    
+    if (!currentConnection) {
       console.error('AudioRecorder: No connection object available');
       return false;
     }
     
-    if (connection.state === 'Connected') {
+    if (currentConnection.state === 'Connected') {
       return true;
     }
     
@@ -186,7 +190,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
       console.log(`AudioRecorder: Tentativo di riconnessione ${attempts}/${maxAttempts}`);
       
       try {
-        await connection.start();
+        await currentConnection.start();
         console.log('AudioRecorder: Connection reestablished!');
         return true;
       } catch (err) {
@@ -200,7 +204,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     }
     
     return false;
-  }, [connection, connectionStatus]);
+  }, [connectionStatus]);
 
   // Gestisce la registrazione fermata
   const handleRecordingStopped = useCallback(async () => {
@@ -255,6 +259,12 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
         onAudioRecorded(audioUrl, base64Chunks);
       }
 
+      // Usa la referenza alla connessione
+      const conn = connectionRef.current;
+      if (!conn) {
+        throw new Error("Connection object lost");
+      }
+
       // Invia i chunk con retry
       let successCount = 0;
       for (let i = 0; i < base64Chunks.length; i++) {
@@ -271,7 +281,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
           
           try {
             // Verifica che la connessione sia ancora valida prima di ogni invio
-            if (connection.state !== 'Connected') {
+            if (conn.state !== 'Connected') {
               console.log(`AudioRecorder: Connection not Connected before chunk ${i}, trying to reconnect...`);
               const reconnected = await ensureConnection(2);
               if (!reconnected) {
@@ -280,7 +290,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
             }
             
             // Invia il chunk
-            await connection.invoke(
+            await conn.invoke(
               'SendAudioChunk',
               userName,
               base64Chunks[i],
@@ -332,7 +342,7 @@ const AudioRecorder = ({ userName, onAudioRecorded }) => {
     } finally {
       setIsSending(false);
     }
-  }, [connection, ensureConnection, errorMessage, language, onAudioRecorded, userName]);
+  }, [ensureConnection, language, onAudioRecorded, userName]);
 
   // Formatta il tempo di registrazione
   const formatTime = (seconds) => {
