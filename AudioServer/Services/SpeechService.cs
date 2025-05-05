@@ -95,8 +95,8 @@ public class SpeechService
             config.SpeechRecognitionLanguage = GetSpeechLanguageCode(language);
 
             // Configura ulteriori opzioni per migliorare il riconoscimento
-            config.SetProperty(PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "5000");
-            config.SetProperty(PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "5000");
+            config.SetProperty(PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "10000");
+            config.SetProperty(PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "10000");
 
             _logger.LogInformation($"[SPEECH] Configurato riconoscimento per lingua: {config.SpeechRecognitionLanguage}");
 
@@ -117,7 +117,8 @@ public class SpeechService
         if (audioBytes.Length < 4)
             return false;
 
-        return audioBytes[0] == 0x1A && audioBytes[1] == 0x45 && audioBytes[2] == 0xDF && audioBytes[3] == 0xA3;
+        return (audioBytes[0] == 0x1A && audioBytes[1] == 0x45 && audioBytes[2] == 0xDF && audioBytes[3] == 0xA3) ||
+           (audioBytes[0] == 0x1A && audioBytes[1] == 0x45 && audioBytes[2] == 0xDF);
     }
 
     private bool IsWavFormat(byte[] audioBytes)
@@ -229,7 +230,7 @@ public class SpeechService
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = _ffmpegPath,
-                    Arguments = $"-f auto -i \"{inputFilePath}\" -acodec pcm_s16le -ar 16000 -ac 1 \"{outputFilePath}\"",
+                    Arguments = $"-i \"{inputFilePath}\" -acodec pcm_s16le -ar 16000 -ac 1 \"{outputFilePath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
