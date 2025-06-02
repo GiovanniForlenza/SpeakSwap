@@ -19,7 +19,8 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
     && apt-get update \
     && apt-get install -y nodejs \
-    && npm install -g npm@latest
+    && npm install -g npm@latest \
+    && npm install @azure/msal-browser @azure/msal-react
 
 # Installa .NET 6
 RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \

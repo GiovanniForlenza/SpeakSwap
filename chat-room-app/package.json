@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@azure/msal-browser": "^4.13.0",
+    "@azure/msal-react": "^3.0.12",
     "@microsoft/signalr": "^8.0.7",
     "@microsoft/signalr-protocol-msgpack": "^8.0.7",
     "@testing-library/dom": "^10.4.0",
