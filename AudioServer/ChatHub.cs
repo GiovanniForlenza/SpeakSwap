@@ -44,10 +44,15 @@ public class ChatHub : Hub
             var connectionId = Context.ConnectionId;
             _logger.LogInformation($"Utente {userName} sta tentando di unirsi alla stanza {roomName} [ConnectionId: {connectionId}]");
 
-            // Memorizza le informazioni utente
+            // Genera un nome utente univoco per questa stanza
+            string uniqueUserName = GenerateUniqueUserName(userName.Trim(), roomName.Trim());
+
+            _logger.LogInformation($"Nome utente univoco generato: {uniqueUserName} (originale: {userName})");
+
+            // Memorizza le informazioni utente con il nome univoco
             var userConnection = new UserConnection
             {
-                UserName = userName.Trim(),
+                UserName = uniqueUserName,
                 RoomName = roomName.Trim(),
                 Language = language
             };
@@ -56,10 +61,10 @@ public class ChatHub : Hub
 
             _rooms.AddOrUpdate(
                 roomName,
-                (key) => new ConcurrentDictionary<string, string>(new[] { new KeyValuePair<string, string>(userName, connectionId) }),
+                (key) => new ConcurrentDictionary<string, string>(new[] { new KeyValuePair<string, string>(uniqueUserName, connectionId) }),
                 (key, room) =>
                 {
-                    room[userName] = connectionId;
+                    room[uniqueUserName] = connectionId;
                     return room;
                 }
             );
@@ -68,23 +73,23 @@ public class ChatHub : Hub
             {
                 // Prima aggiungi al gruppo
                 await Groups.AddToGroupAsync(connectionId, roomName);
-                _logger.LogInformation($"Utente {userName} aggiunto al gruppo {roomName}");
+                _logger.LogInformation($"Utente {uniqueUserName} aggiunto al gruppo {roomName}");
 
-                // Invia messaggio di conferma al chiamante
-                await Clients.Caller.SendAsync("JoinedRoom", roomName);
+                // Invia messaggio di conferma al chiamante con il nome univoco
+                await Clients.Caller.SendAsync("JoinedRoom", roomName, uniqueUserName);
 
                 // Poi notifica altri utenti
-                await Clients.OthersInGroup(roomName).SendAsync("UserJoined", userName);
+                await Clients.OthersInGroup(roomName).SendAsync("UserJoined", uniqueUserName);
 
                 // Infine, invia la lista utenti al nuovo membro
                 var usersInRoom = _rooms[roomName].Keys.ToList();
                 await Clients.Caller.SendAsync("UsersInRoom", usersInRoom);
 
-                _logger.LogInformation($"Utente {userName} si è unito alla stanza {roomName} con successo. Utenti nella stanza: {string.Join(", ", usersInRoom)}");
+                _logger.LogInformation($"Utente {uniqueUserName} si è unito alla stanza {roomName} con successo. Utenti nella stanza: {string.Join(", ", usersInRoom)}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Errore nell'aggiungere l'utente {userName} al gruppo {roomName}");
+                _logger.LogError(ex, $"Errore nell'aggiungere l'utente {uniqueUserName} al gruppo {roomName}");
             }
         }
         catch (Exception ex)
@@ -92,6 +97,49 @@ public class ChatHub : Hub
             _logger.LogError(ex, $"Errore globale in JoinRoom per {userName} in {roomName}");
         }
     }
+
+
+    private string GenerateUniqueUserName(string requestedName, string roomName)
+    {
+        // Se la stanza non esiste ancora, il nome è automaticamente univoco
+        if (!_rooms.TryGetValue(roomName, out var users))
+        {
+            _logger.LogInformation($"Stanza {roomName} non esiste ancora, nome {requestedName} è univoco");
+            return requestedName;
+        }
+
+        // Controlla se il nome è già in uso
+        if (!users.ContainsKey(requestedName))
+        {
+            _logger.LogInformation($"Nome {requestedName} non in uso nella stanza {roomName}");
+            return requestedName;
+        }
+
+        // Il nome è già in uso, genera una variante univoca
+        int counter = 2;
+        string uniqueName;
+
+        do
+        {
+            uniqueName = $"{requestedName} ({counter})";
+            counter++;
+
+            // Protezione contro loop infiniti (max 100 tentativi)
+            if (counter > 100)
+            {
+                // Come ultimo fallback, usa timestamp
+                uniqueName = $"{requestedName} ({DateTime.Now.Ticks % 10000})";
+                _logger.LogWarning($"Raggiunto limite tentativi per nome univoco, usando timestamp: {uniqueName}");
+                break;
+            }
+        }
+        while (users.ContainsKey(uniqueName));
+
+        _logger.LogInformation($"Nome duplicato rilevato. Nome originale: {requestedName}, nome univoco generato: {uniqueName}");
+        return uniqueName;
+    }
+
+
 
     // Disconnessione utente
     public override async Task OnDisconnectedAsync(Exception? exception)
@@ -173,15 +221,17 @@ public class ChatHub : Hub
 
             if (_connections.TryGetValue(connectionId, out var userConnection))
             {
+                // Usa il nome utente memorizzato nella connessione (che è già univoco)
+                var actualUserName = userConnection.UserName;
                 var roomName = userConnection.RoomName;
-                _logger.LogInformation($"Messaggio da {userName} in lingua {sourceLanguage} nella stanza {roomName}: {message}");
+
+                _logger.LogInformation($"Messaggio da {actualUserName} in lingua {sourceLanguage} nella stanza {roomName}: {message}");
 
                 // Invia il messaggio originale al mittente
-                await Clients.Caller.SendAsync("ReceiveMessage", userName, message);
+                await Clients.Caller.SendAsync("ReceiveMessage", actualUserName, message);
 
                 // Ottieni le lingue dei destinatari e crea un dizionario di lingue e connessioni
-                var targetLanguages = GetTargetLanguagesInRoom(roomName, userName);
-                var connectionsByLanguage = GetConnectionsByLanguage(roomName, userName);
+                var connectionsByLanguage = GetConnectionsByLanguage(roomName, actualUserName);
 
                 // Traduci e invia il messaggio agli altri utenti
                 foreach (var entry in connectionsByLanguage)
@@ -210,7 +260,7 @@ public class ChatHub : Hub
                     }
 
                     // Invia il messaggio tradotto agli utenti con questa lingua
-                    await Clients.Clients(targetConnections).SendAsync("ReceiveMessage", userName, translatedMessage);
+                    await Clients.Clients(targetConnections).SendAsync("ReceiveMessage", actualUserName, translatedMessage);
                 }
             }
             else
@@ -225,6 +275,7 @@ public class ChatHub : Hub
         }
     }
 
+
     public async Task SendAudioChunk(string userName, string chunk, int chunkId, bool isLastChunk, int totalChunks, string sourceLanguage)
     {
         try
@@ -233,11 +284,12 @@ public class ChatHub : Hub
 
             if (_connections.TryGetValue(connectionId, out var userConnection))
             {
+                var actualUserName = userConnection.UserName;
                 var roomName = userConnection.RoomName;
-                _logger.LogInformation($"Chunk audio {chunkId}/{totalChunks} da {userName} nella stanza {roomName}, isLastChunk: {isLastChunk}");
+                _logger.LogInformation($"Chunk audio {chunkId}/{totalChunks} da {actualUserName} nella stanza {roomName}, isLastChunk: {isLastChunk}");
 
                 // IMPORTANTE: Crea una chiave utente
-                string userKey = $"{userName}_{roomName}";
+                string userKey = $"{actualUserName}_{roomName}";
 
                 // Dichiara le variabili per ID sessione e chiave completa
                 string sessionId;
@@ -307,7 +359,7 @@ public class ChatHub : Hub
                     // --------- INVIO DEL CHUNK AGLI ALTRI UTENTI ---------
                     await Clients.GroupExcept(roomName, connectionId).SendAsync(
                         "ReceiveAudioChunk",
-                        userName,
+                        actualUserName,
                         chunk,
                         chunkId,
                         isLastChunk,
@@ -353,7 +405,7 @@ public class ChatHub : Hub
                         {
                             try
                             {
-                                await ProcessAudioForTranslation(userName, roomName, completeAudioBase64, sourceLanguage);
+                                await ProcessAudioForTranslation(actualUserName, roomName, completeAudioBase64, sourceLanguage);
 
                                 // Pulisci le risorse
                                 _pendingAudioChunks.TryRemove(sessionKeyFull, out _);

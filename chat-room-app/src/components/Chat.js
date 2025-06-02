@@ -159,6 +159,20 @@ const Chat = () => {
       }
     });
 
+    connection.on('JoinedRoom', (roomJoined, actualUserName) => {
+      const originalUserName = new URLSearchParams(location.search).get("userName");
+      
+      if (actualUserName !== originalUserName) {
+        // Mostra un messaggio di sistema
+        setMessages(prevMessages => [...prevMessages, {
+          user: 'System',
+          text: `Il tuo nome è stato cambiato in "${actualUserName}" per evitare duplicati`,
+          time: new Date(),
+          type: 'system'
+        }]);
+      }
+    });
+
     // Aggiunge un messaggio di sistema quando un utente entra o esce
     connection.on('UserJoined', (user, userLang) => {
       if (user !== userName) {

@@ -125,8 +125,15 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
           });
           
           // Eventi stanza
-          hubConnection.on('JoinedRoom', (roomJoined) => {
-            addLog(`Sei entrato nella stanza: ${roomJoined}`);
+          hubConnection.on('JoinedRoom', (roomJoined, actualUserName) => {
+            addLog(`Sei entrato nella stanza: ${roomJoined} con nome: ${actualUserName}`);
+
+            if (actualUserName !== userName) {
+              addLog(`Il nome utente è stato cambiato in: ${actualUserName}`, 'warn');
+              const newUrl = new URL(window.location);
+              newUrl.searchParams.set('userName', actualUserName);
+              window.history.replaceState({}, '', newUrl);
+            }
           });
           
           hubConnection.on('UserJoined', (user) => {
