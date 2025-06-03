@@ -1,7 +1,7 @@
 FROM --platform=linux/amd64 ubuntu:20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV NODE_VERSION=20.x
+ENV NODE_VERSION=20
 
 # Installa dipendenze di base
 RUN apt-get update && apt-get install -y \
@@ -15,12 +15,14 @@ RUN apt-get update && apt-get install -y \
     libopusfile0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Installa Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
+# Installa Node.js (versione corretta)
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get update \
     && apt-get install -y nodejs \
-    && npm install -g npm@latest \
-    && npm install @azure/msal-browser @azure/msal-react
+    && npm install -g npm@latest
+
+# Installa i pacchetti Azure globalmente per evitare errori
+RUN npm install -g @azure/msal-browser @azure/msal-react
 
 # Installa .NET 6
 RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
