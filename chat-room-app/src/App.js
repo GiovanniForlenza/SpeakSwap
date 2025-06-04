@@ -12,8 +12,8 @@ import { SignalRConnectionProvider } from './components/SignalRConnectionProvide
 const msalInstance = new PublicClientApplication(msalConfig);
 
 const getHubUrl = () => {
-  // const localUrl = 'http://localhost:8081/chatHub';
-  const localUrl = 'http://localhost:5051/chatHub';
+  const localUrl = 'http://localhost:8081/chatHub';
+  // const localUrl = 'http://localhost:5051/chatHub';
   const productionUrl = 'https://speakswapserver-gzf6fpbjb0gma3fb.italynorth-01.azurewebsites.net/chatHub';
 
   if (typeof window !== 'undefined') {
