@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Azure.SignalR;
+using Microsoft.Azure.Cosmos;
 using System;
 
 
@@ -50,6 +51,23 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddSingleton<TranslationService>();
 builder.Services.AddSingleton<SpeechService>();
+builder.Services.AddSingleton<IConversationLogService, ConversationLogService>();
+
+builder.Services.AddSingleton<CosmosClient>(provider =>
+{
+    var connectionString = builder.Configuration["Azure:CosmosDB:ConnectionString"];
+    
+    var cosmosClientOptions = new CosmosClientOptions
+    {
+        SerializerOptions = new CosmosSerializationOptions
+        {
+            PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase,
+            IgnoreNullValues = false
+        }
+    };
+    
+    return new CosmosClient(connectionString, cosmosClientOptions);
+});
 
 var app = builder.Build();
 
