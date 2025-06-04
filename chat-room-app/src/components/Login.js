@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
+import { API_ENDPOINTS, apiCall } from '../apiConfig.js'; 
 
 // Componente per lo storico delle conversazioni
 const ConversationHistory = ({ onRoomSelect, onNewChat, userName }) => {
@@ -18,26 +19,7 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, userName }) => {
         setLoading(true);
         setError('');
         
-        // URL ASSOLUTO del backend
-        const apiUrl = `http://localhost:8081/api/UserHistory/rooms/${encodeURIComponent(userName)}`;
-        console.log('🔗 Chiamando API:', apiUrl);
-        
-        const response = await fetch(apiUrl, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          // Aggiungi questa opzione per CORS
-          mode: 'cors'
-        });
-        
-        console.log('📡 Risposta:', response.status, response.statusText);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
+        const data = await apiCall(API_ENDPOINTS.USER_ROOMS(userName));
         console.log('✅ Dati ricevuti:', data);
         setRooms(data.rooms || []);
       } catch (err) {
@@ -59,25 +41,7 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, userName }) => {
       setLoadingMessages(true);
       setError('');
       
-      // URL ASSOLUTO del backend
-      const apiUrl = `http://localhost:8081/api/UserHistory/conversation/${encodeURIComponent(roomName)}/${encodeURIComponent(userName)}`;
-      console.log('🔗 Chiamando API conversazione:', apiUrl);
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        mode: 'cors'
-      });
-      
-      console.log('📡 Risposta conversazione:', response.status);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
+      const data = await apiCall(API_ENDPOINTS.CONVERSATION(roomName, userName));
       console.log('✅ Messaggi ricevuti:', data);
       setMessages(data.messages || []);
       setSelectedRoom(roomName);
@@ -134,6 +98,12 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, userName }) => {
           border: '1px solid #f8bbd9'
         }}>
           ⚠️ {error}
+          <details style={{ marginTop: '10px', fontSize: '12px' }}>
+            <summary>Debug Info</summary>
+            <div>Environment: {process.env.NODE_ENV}</div>
+            <div>Hostname: {window.location.hostname}</div>
+            <div>API URL: {API_ENDPOINTS.USER_ROOMS('test').replace('/test', '')}</div>
+          </details>
         </div>
       )}
 
@@ -169,24 +139,9 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, userName }) => {
                     transition: 'all 0.3s ease',
                     boxShadow: selectedRoom === room.roomName 
                       ? '0 4px 12px rgba(33,150,243,0.3)' 
-                      : '0 2px 8px rgba(0,0,0,0.1)',
-                    ':hover': {
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.15)'
-                    }
+                      : '0 2px 8px rgba(0,0,0,0.1)'
                   }}
                   onClick={() => loadRoomMessages(room.roomName)}
-                  onMouseEnter={(e) => {
-                    if (selectedRoom !== room.roomName) {
-                      e.target.style.backgroundColor = '#f8f9fa';
-                      e.target.style.transform = 'translateY(-2px)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (selectedRoom !== room.roomName) {
-                      e.target.style.backgroundColor = 'white';
-                      e.target.style.transform = 'translateY(0)';
-                    }
-                  }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
@@ -250,14 +205,6 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, userName }) => {
                         alignItems: 'center',
                         gap: '6px',
                         transition: 'all 0.2s ease'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.target.style.backgroundColor = '#45a049';
-                        e.target.style.transform = 'scale(1.05)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.target.style.backgroundColor = '#4CAF50';
-                        e.target.style.transform = 'scale(1)';
                       }}
                     >
                       ▶️ Riprendi
@@ -499,12 +446,6 @@ function Login() {
                     backdropFilter: 'blur(10px)',
                     transition: 'all 0.3s ease'
                 }}
-                onMouseEnter={(e) => {
-                    e.target.style.backgroundColor = 'rgba(255,255,255,0.3)';
-                }}
-                onMouseLeave={(e) => {
-                    e.target.style.backgroundColor = 'rgba(255,255,255,0.2)';
-                }}
             >
                 ← Torna allo storico
             </button>
@@ -569,12 +510,6 @@ function Login() {
                             transition: 'border-color 0.3s ease',
                             outline: 'none'
                         }}
-                        onFocus={(e) => {
-                            e.target.style.borderColor = '#2196F3';
-                        }}
-                        onBlur={(e) => {
-                            e.target.style.borderColor = '#e0e0e0';
-                        }}
                     />
                     <small style={{ color: '#666', fontSize: '12px', marginTop: '5px', display: 'block' }}>
                         Puoi modificare il nome che appare nella chat
@@ -603,12 +538,6 @@ function Login() {
                             fontSize: '16px',
                             transition: 'border-color 0.3s ease',
                             outline: 'none'
-                        }}
-                        onFocus={(e) => {
-                            e.target.style.borderColor = '#2196F3';
-                        }}
-                        onBlur={(e) => {
-                            e.target.style.borderColor = '#e0e0e0';
                         }}
                     />
                     {roomName && (
@@ -671,18 +600,6 @@ function Login() {
                         fontWeight: 'bold',
                         transition: 'all 0.3s ease',
                         backgroundImage: isLoading ? 'none' : 'linear-gradient(45deg, #2196F3, #21CBF3)'
-                    }}
-                    onMouseEnter={(e) => {
-                        if (!isLoading) {
-                            e.target.style.transform = 'translateY(-2px)';
-                            e.target.style.boxShadow = '0 8px 25px rgba(33,150,243,0.3)';
-                        }
-                    }}
-                    onMouseLeave={(e) => {
-                        if (!isLoading) {
-                            e.target.style.transform = 'translateY(0)';
-                            e.target.style.boxShadow = 'none';
-                        }
                     }}
                 >
                     {isLoading ? '⏳ Connecting...' : 
