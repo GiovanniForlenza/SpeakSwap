@@ -51,22 +51,13 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddSingleton<TranslationService>();
 builder.Services.AddSingleton<SpeechService>();
-builder.Services.AddSingleton<IConversationLogService, ConversationLogService>();
+builder.Services.AddScoped<IConversationLogService, ConversationLogService>();
+builder.Services.AddControllers();
 
 builder.Services.AddSingleton<CosmosClient>(provider =>
 {
     var connectionString = builder.Configuration["Azure:CosmosDB:ConnectionString"];
-    
-    var cosmosClientOptions = new CosmosClientOptions
-    {
-        SerializerOptions = new CosmosSerializationOptions
-        {
-            PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase,
-            IgnoreNullValues = false
-        }
-    };
-    
-    return new CosmosClient(connectionString, cosmosClientOptions);
+    return new CosmosClient(connectionString);
 });
 
 var app = builder.Build();
@@ -88,5 +79,5 @@ app.MapGet("/healthcheck", () =>
 });
 
 app.MapHub<ChatHub>("/chatHub");
-
+app.MapControllers();
 app.Run();

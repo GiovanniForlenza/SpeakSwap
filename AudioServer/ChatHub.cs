@@ -55,6 +55,7 @@ public class ChatHub : Hub
             var userConnection = new UserConnection
             {
                 UserName = uniqueUserName,
+                OriginalUserName = userName.Trim(),
                 RoomName = roomName.Trim(),
                 Language = language
             };
@@ -263,7 +264,7 @@ public class ChatHub : Hub
                 {
                     try
                     {
-                        await _conversationLogService.LogMessageAsync(roomName, actualUserName, message, sourceLanguage, "text");
+                        await _conversationLogService.LogMessageAsync(roomName, userConnection.OriginalUserName, message, sourceLanguage, "text");
                     }
                     catch (Exception ex)
                     {
@@ -662,6 +663,7 @@ public class ChatHub : Hub
     public class UserConnection
     {
         public string UserName { get; set; } = string.Empty;
+        public string OriginalUserName { get; set; } = string.Empty;
         public string RoomName { get; set; } = string.Empty;
         public string Language { get; set; } = "it";
     }
