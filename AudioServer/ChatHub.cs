@@ -7,6 +7,7 @@ public class ChatHub : Hub
     private readonly TranslationService _translationService;
     private readonly SpeechService _speechService;
     private readonly IHubContext<ChatHub> _hubContext;
+    private readonly IConversationLogService _conversationLogService;
 
     // Dizionario per memorizzare connessioni utente: connectionId -> (userName, roomName)
     private static readonly ConcurrentDictionary<string, UserConnection> _connections =
@@ -28,12 +29,13 @@ public class ChatHub : Hub
     private static readonly ConcurrentDictionary<string, long> _sessionCounters =
         new ConcurrentDictionary<string, long>();
 
-    public ChatHub(ILogger<ChatHub> logger, TranslationService translationService, SpeechService speechService, IHubContext<ChatHub> hubContext)
+    public ChatHub(ILogger<ChatHub> logger, TranslationService translationService, SpeechService speechService, IHubContext<ChatHub> hubContext, IConversationLogService conversationLogService)
     {
         _hubContext = hubContext;
         _logger = logger;
         _translationService = translationService;
         _speechService = speechService;
+        _conversationLogService = conversationLogService;
     }
 
     // Utente entra in una stanza
@@ -221,25 +223,20 @@ public class ChatHub : Hub
 
             if (_connections.TryGetValue(connectionId, out var userConnection))
             {
-                // Usa il nome utente memorizzato nella connessione (che è già univoco)
                 var actualUserName = userConnection.UserName;
                 var roomName = userConnection.RoomName;
 
                 _logger.LogInformation($"Messaggio da {actualUserName} in lingua {sourceLanguage} nella stanza {roomName}: {message}");
 
-                // Invia il messaggio originale al mittente
                 await Clients.Caller.SendAsync("ReceiveMessage", actualUserName, message);
 
-                // Ottieni le lingue dei destinatari e crea un dizionario di lingue e connessioni
                 var connectionsByLanguage = GetConnectionsByLanguage(roomName, actualUserName);
 
-                // Traduci e invia il messaggio agli altri utenti
                 foreach (var entry in connectionsByLanguage)
                 {
                     var targetLanguage = entry.Key;
                     var targetConnections = entry.Value;
 
-                    // Traduci il messaggio
                     string translatedMessage;
                     if (targetLanguage == sourceLanguage)
                     {
@@ -255,13 +252,24 @@ public class ChatHub : Hub
                         catch (Exception ex)
                         {
                             _logger.LogError(ex, $"Errore nella traduzione del messaggio da {sourceLanguage} a {targetLanguage}");
-                            translatedMessage = message; // Fallback al messaggio originale
+                            translatedMessage = message;
                         }
                     }
 
-                    // Invia il messaggio tradotto agli utenti con questa lingua
                     await Clients.Clients(targetConnections).SendAsync("ReceiveMessage", actualUserName, translatedMessage);
                 }
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _conversationLogService.LogMessageAsync(roomName, actualUserName, message, sourceLanguage, "text");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Errore nel logging del messaggio");
+                    }
+                });
             }
             else
             {
@@ -449,11 +457,9 @@ public class ChatHub : Hub
         {
             _logger.LogInformation($"INIZIO PROCESSAMENTO AUDIO per {userName} in stanza {roomName}, lunghezza base64: {audioBase64.Length} caratteri");
 
-            // Ottieni informazioni necessarie prima di iniziare operazioni asincrone lunghe
             Dictionary<string, List<string>> connectionsByLanguage = GetConnectionsByLanguage(roomName, userName);
             _logger.LogInformation($"Traduzione necessaria per {connectionsByLanguage.Count} lingue diverse");
 
-            // 1. Converti audio in testo
             string recognizedText;
             try
             {
@@ -469,27 +475,24 @@ public class ChatHub : Hub
             if (string.IsNullOrEmpty(recognizedText))
             {
                 _logger.LogWarning($"Nessun testo riconosciuto dall'audio di {userName}");
-
-                // Debug: Verifica formato audio salvando un campione
-                try
-                {
-                    byte[] audioBytes = Convert.FromBase64String(audioBase64);
-                    _logger.LogInformation($"[DEBUG] Audio decodificato: {audioBytes.Length} bytes, primi byte: {string.Join(", ", audioBytes.Take(20).Select(b => b.ToString("X2")))}");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[DEBUG] Errore nella decodifica dell'audio base64");
-                }
-
                 return false;
             }
 
             _logger.LogInformation($"Testo riconosciuto dall'audio di {userName}: \"{recognizedText}\"");
 
-            // 3. Per ogni lingua target, traduci e converti in audio
-            bool anySuccess = false;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _conversationLogService.LogMessageAsync(roomName, userName, recognizedText, sourceLanguage, "audio_transcription");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Errore nel logging trascrizione audio");
+                }
+            });
 
-            // Crea un elenco di task per elaborare tutte le lingue in parallelo
+            bool anySuccess = false;
             List<Task> translationTasks = new();
 
             foreach (var entry in connectionsByLanguage)
@@ -497,17 +500,14 @@ public class ChatHub : Hub
                 var targetLanguage = entry.Key;
                 var targetConnections = entry.Value;
 
-                // Salta la traduzione se la lingua è la stessa
                 if (targetLanguage == sourceLanguage)
                 {
                     _logger.LogInformation($"Lingua target {targetLanguage} uguale a lingua sorgente, salto traduzione");
                     continue;
                 }
 
-                // Ogni traduzione viene eseguita in un task separato
                 translationTasks.Add(Task.Run(async () =>
                 {
-                    // Traduci il testo
                     string translatedText;
                     try
                     {
@@ -520,7 +520,6 @@ public class ChatHub : Hub
                         return;
                     }
 
-                    // Converti il testo tradotto in audio
                     string translatedAudioBase64;
                     try
                     {
@@ -539,13 +538,10 @@ public class ChatHub : Hub
                         return;
                     }
 
-                    // Invia l'audio tradotto agli utenti
                     try
                     {
                         _logger.LogInformation($"Invio audio tradotto a {targetConnections.Count} utenti con lingua {targetLanguage}");
 
-                        // Ottieni l'oggetto IHubContext da ServiceProvider
-                        // Usare un oggetto IHubContext non soggetto a dispose
                         await _hubContext.Clients.Clients(targetConnections).SendAsync(
                             "ReceiveTranslatedAudio",
                             userName,
@@ -563,10 +559,8 @@ public class ChatHub : Hub
                 }));
             }
 
-            // Attendi che tutte le traduzioni siano completate
             await Task.WhenAll(translationTasks);
 
-            // Se almeno una traduzione ha avuto successo, considera l'intero processo come riuscito
             if (anySuccess)
             {
                 _logger.LogInformation($"COMPLETATO processamento audio per {userName} con successo");
