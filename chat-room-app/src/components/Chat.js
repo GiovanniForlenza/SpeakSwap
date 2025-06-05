@@ -319,7 +319,7 @@ const Chat = () => {
         }
       });
     };
-  }, [connection, userName, addLog, roomName, language, location.search]);
+  }, [connection, userName, addLog, roomName, language, location.search, messages]);
 
   if (!userName || (!roomName && !createRoom)) {
     return (
