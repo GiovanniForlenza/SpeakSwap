@@ -69,26 +69,27 @@ export const SignalRConnectionProvider = ({ hubUrl, children }) => {
       
       return new HubConnectionBuilder()
         .withUrl(hubUrl, {
-            skipNegotiation: false, // Cambiato: consenti negoziazione per Azure SignalR
-            transport: HttpTransportType.WebSockets,
-            serverTimeoutInMilliseconds: 100000, // 100 secondi di timeout
-            keepAliveIntervalInMilliseconds: 15000 // 15 secondi di keep-alive
+          skipNegotiation: false,
+          transport: HttpTransportType.WebSockets | HttpTransportType.ServerSentEvents | HttpTransportType.LongPolling, 
+          withCredentials: false, 
+          serverTimeoutInMilliseconds: 100000,
+          keepAliveIntervalInMilliseconds: 15000
         })
         .configureLogging(LogLevel.Information)
         .withAutomaticReconnect({
           nextRetryDelayInMilliseconds: retryContext => {
-            // Incrementa il contatore di tentativi
             setReconnectCount(prev => prev + 1);
             
+            // Ritardi più brevi per i primi tentativi
+            if (retryContext.previousRetryCount === 0) return 1000;
+            if (retryContext.previousRetryCount === 1) return 2000;
+            if (retryContext.previousRetryCount === 2) return 3000;
             if (retryContext.previousRetryCount < 10) {
-              const delayMs = Math.min(1000 * Math.pow(1.5, retryContext.previousRetryCount), 30000);
-              addLog(`Tentativo di riconnessione ${retryContext.previousRetryCount + 1} tra ${delayMs}ms`);
-              return delayMs;
+              return Math.min(5000 * retryContext.previousRetryCount, 30000);
             }
             return null;
           }
-        })
-        .build();
+        }).build();
     };
 
     // Funzione per avviare la connessione

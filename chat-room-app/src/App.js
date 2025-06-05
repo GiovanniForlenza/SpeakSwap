@@ -34,8 +34,7 @@ const UserInfo = () => {
   }
 
   return (
-    <div style={{ 
-      position: 'absolute', 
+    <div style={{
       top: '10px', 
       right: '10px', 
       background: '#f5f5f5', 
@@ -46,9 +45,9 @@ const UserInfo = () => {
       <div style={{ marginBottom: '8px' }}>
         <strong>Benvenuto:</strong> {accounts[0]?.name || 'Utente'}
       </div>
-      <div style={{ marginBottom: '8px' }}>
+      {/* <div style={{ marginBottom: '8px' }}>
         <strong>Email:</strong> {accounts[0]?.username || 'N/A'}
-      </div>
+      </div> */}
       <button 
         onClick={handleLogout}
         style={{
@@ -75,8 +74,7 @@ const AuthenticatedContent = () => {
   if (!isAuthenticated) {
     return <AzureLoginPage />; 
   }
-  
-  // Se l'utente è autenticato, mostra il contenuto + UserInfo
+
   return (
     <div style={{ position: 'relative' }}>
       <UserInfo /> 
