@@ -29,6 +29,9 @@ public class ChatHub : Hub
     private static readonly ConcurrentDictionary<string, long> _sessionCounters =
         new ConcurrentDictionary<string, long>();
 
+    private static readonly ConcurrentDictionary<string, DateTime> _recentRoomCreations = 
+        new ConcurrentDictionary<string, DateTime>();
+
     public ChatHub(ILogger<ChatHub> logger, TranslationService translationService, SpeechService speechService, IHubContext<ChatHub> hubContext, IConversationLogService conversationLogService)
     {
         _hubContext = hubContext;
@@ -36,6 +39,167 @@ public class ChatHub : Hub
         _translationService = translationService;
         _speechService = speechService;
         _conversationLogService = conversationLogService;
+    }
+
+    // Metodo per creare una nuova stanza con ID univoco
+    public async Task<string> CreateRoom(string userName, string language)
+    {
+        try
+        {
+            var connectionId = Context.ConnectionId;
+            
+            // Previeni creazioni multiple dallo stesso connection ID
+            if (_recentRoomCreations.TryGetValue(connectionId, out var lastCreation))
+            {
+                if ((DateTime.UtcNow - lastCreation).TotalSeconds < 5)
+                {
+                    _logger.LogWarning($"Tentativo di creazione stanza troppo frequente da {connectionId}");
+                    throw new HubException("Attendere prima di creare un'altra stanza");
+                }
+            }
+            
+            _recentRoomCreations[connectionId] = DateTime.UtcNow;
+            
+            _logger.LogInformation($"Utente {userName} sta creando una nuova stanza [ConnectionId: {connectionId}]");
+
+            // Validazione input
+            if (string.IsNullOrWhiteSpace(userName))
+            {
+                _logger.LogError("Nome utente vuoto nella creazione stanza");
+                throw new HubException("Il nome utente è obbligatorio");
+            }
+
+            // Genera un ID stanza univoco
+            string roomId = GenerateRoomId();
+            
+            _logger.LogInformation($"Generato room ID: {roomId}");
+
+            // Genera un nome utente univoco per questa stanza
+            string uniqueUserName = GenerateUniqueUserName(userName.Trim(), roomId);
+
+            // Memorizza le informazioni utente
+            var userConnection = new UserConnection
+            {
+                UserName = uniqueUserName,
+                RoomName = roomId,
+                Language = language,
+                IsRoomCreator = true,
+                JoinedAt = DateTime.UtcNow
+            };
+
+            _connections[connectionId] = userConnection;
+
+            // Crea la stanza
+            _rooms.AddOrUpdate(
+                roomId,
+                (key) => new ConcurrentDictionary<string, string>(new[] { new KeyValuePair<string, string>(uniqueUserName, connectionId) }),
+                (key, room) =>
+                {
+                    room[uniqueUserName] = connectionId;
+                    return room;
+                }
+            );
+
+            try
+            {
+                await Groups.AddToGroupAsync(connectionId, roomId);
+                _logger.LogInformation($"Utente {uniqueUserName} aggiunto al gruppo {roomId}");
+
+                await Clients.Caller.SendAsync("JoinedRoom", roomId, uniqueUserName);
+                
+                var usersInRoom = _rooms[roomId].Keys.ToList();
+                await Clients.Caller.SendAsync("UsersInRoom", usersInRoom);
+
+                _logger.LogInformation($"Stanza {roomId} creata con successo da {uniqueUserName}");
+
+                var keysToRemove = _recentRoomCreations
+                    .Where(kvp => (DateTime.UtcNow - kvp.Value).TotalMinutes > 5)
+                    .Select(kvp => kvp.Key)
+                    .ToList();
+                
+                foreach (var key in keysToRemove)
+                {
+                    _recentRoomCreations.TryRemove(key, out _);
+                }
+                
+                return roomId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Errore nell'aggiungere l'utente al gruppo {roomId}");
+                
+                _connections.TryRemove(connectionId, out _);
+                if (_rooms.TryGetValue(roomId, out var room))
+                {
+                    room.TryRemove(uniqueUserName, out _);
+                    if (room.IsEmpty)
+                    {
+                        _rooms.TryRemove(roomId, out _);
+                    }
+                }
+                
+                throw;
+            }
+        }
+        catch (HubException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Errore globale nella creazione stanza per {userName}");
+            throw new HubException("Errore nella creazione della stanza. Riprova più tardi.");
+        }
+    }
+
+    public async Task<bool> CheckRoomAccess(string roomId)
+    {
+        try
+        {
+            _logger.LogInformation($"Verifica accesso alla stanza {roomId}");
+            
+            bool roomExists = _rooms.ContainsKey(roomId);
+            
+            await Clients.Caller.SendAsync("RoomAccessResult", roomId, roomExists);
+            
+            _logger.LogInformation($"Stanza {roomId} - Esistente: {roomExists}");
+            return roomExists;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Errore nella verifica accesso stanza {roomId}");
+            return false;
+        }
+    }
+
+    // Metodo per ottenere informazioni sulla stanza
+    public async Task GetRoomInfo(string roomId)
+    {
+        try
+        {
+            if (_rooms.TryGetValue(roomId, out var users))
+            {
+                var roomInfo = new
+                {
+                    RoomId = roomId,
+                    UserCount = users.Count,
+                    Users = users.Keys.ToList(),
+                    IsActive = true
+                };
+
+                await Clients.Caller.SendAsync("RoomInfo", roomInfo);
+                _logger.LogInformation($"Info stanza {roomId}: {users.Count} utenti");
+            }
+            else
+            {
+                await Clients.Caller.SendAsync("RoomInfo", new { RoomId = roomId, IsActive = false });
+                _logger.LogInformation($"Stanza {roomId} non trovata o non attiva");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Errore nel recuperare info stanza {roomId}");
+        }
     }
 
     // Utente entra in una stanza
@@ -55,9 +219,10 @@ public class ChatHub : Hub
             var userConnection = new UserConnection
             {
                 UserName = uniqueUserName,
-                OriginalUserName = userName.Trim(),
                 RoomName = roomName.Trim(),
-                Language = language
+                Language = language,
+                IsRoomCreator = false,
+                JoinedAt = DateTime.UtcNow
             };
 
             _connections[connectionId] = userConnection;
@@ -101,6 +266,17 @@ public class ChatHub : Hub
         }
     }
 
+    // Genera un ID stanza user-friendly
+    private string GenerateRoomId()
+    {
+        // Formato: YYYYMMDD-HHMM-RANDOM (es: 20250604-1730-4521)
+        var dateTime = DateTime.UtcNow;
+        var random = new Random().Next(1000, 9999);
+        var roomId = $"{dateTime:yyyyMMdd}-{dateTime:HHmm}-{random}";
+        
+        _logger.LogInformation($"Generato room ID: {roomId}");
+        return roomId;
+    }
 
     private string GenerateUniqueUserName(string requestedName, string roomName)
     {
@@ -142,9 +318,7 @@ public class ChatHub : Hub
         return uniqueName;
     }
 
-
-
-    // Disconnessione utente
+    // Disconnessione utente con gestione stanze temporanee
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         try
@@ -152,7 +326,6 @@ public class ChatHub : Hub
             var connectionId = Context.ConnectionId;
             _logger.LogInformation($"Connection disconnected: {connectionId}");
 
-            // Rimuovi l'utente dalle mappature
             if (_connections.TryRemove(connectionId, out var userConnection))
             {
                 var userName = userConnection.UserName;
@@ -171,11 +344,14 @@ public class ChatHub : Hub
                 {
                     users.TryRemove(userName, out _);
 
-                    // Se la stanza è vuota, rimuovila
+                    // Se la stanza è vuota, rimuovila completamente (stanza temporanea)
                     if (users.IsEmpty)
                     {
                         _rooms.TryRemove(roomName, out _);
-                        _logger.LogInformation($"Stanza {roomName} rimossa perché vuota");
+                        _logger.LogInformation($"🗑️ Stanza temporanea {roomName} DISTRUTTA - nessun utente rimasto");
+                        
+                        // Notifica che la stanza è stata distrutta
+                        await Clients.All.SendAsync("RoomDestroyed", roomName);
                     }
                     else
                     {
@@ -191,12 +367,13 @@ public class ChatHub : Hub
                                 _logger.LogError(ex, $"Errore nell'inviare UserLeft a {user.Key} ({user.Value})");
                             }
                         }
+                        
+                        _logger.LogInformation($"Stanza {roomName} - rimangono {users.Count} utenti");
                     }
                 }
 
                 try
                 {
-                    // Tentativo di rimuovere l'utente dal gruppo SignalR
                     await Groups.RemoveFromGroupAsync(connectionId, roomName);
                 }
                 catch (Exception ex)
@@ -264,7 +441,7 @@ public class ChatHub : Hub
                 {
                     try
                     {
-                        await _conversationLogService.LogMessageAsync(roomName, userConnection.OriginalUserName, message, sourceLanguage, "text");
+                        await _conversationLogService.LogMessageAsync(roomName, actualUserName, message, sourceLanguage, "text");
                     }
                     catch (Exception ex)
                     {
@@ -283,7 +460,6 @@ public class ChatHub : Hub
             _logger.LogError(ex, $"Errore globale in SendMessage per {userName}");
         }
     }
-
 
     public async Task SendAudioChunk(string userName, string chunk, int chunkId, bool isLastChunk, int totalChunks, string sourceLanguage)
     {
@@ -663,8 +839,9 @@ public class ChatHub : Hub
     public class UserConnection
     {
         public string UserName { get; set; } = string.Empty;
-        public string OriginalUserName { get; set; } = string.Empty;
         public string RoomName { get; set; } = string.Empty;
         public string Language { get; set; } = "it";
+        public bool IsRoomCreator { get; set; } = false;
+        public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
     }
 }
