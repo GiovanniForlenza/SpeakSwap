@@ -435,11 +435,11 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, onCreateRoom, userName }
     }
   };
 
-  const joinExistingRoom = (roomName) => {
-    if (onRoomSelect) {
-      onRoomSelect(roomName);
-    }
-  };
+  // const joinExistingRoom = (roomName) => {
+  //   if (onRoomSelect) {
+  //     onRoomSelect(roomName);
+  //   }
+  // };
 
   if (loading) {
     return (
