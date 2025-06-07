@@ -435,12 +435,6 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, onCreateRoom, userName }
     }
   };
 
-  // const joinExistingRoom = (roomName) => {
-  //   if (onRoomSelect) {
-  //     onRoomSelect(roomName);
-  //   }
-  // };
-
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '40px' }}>
@@ -573,9 +567,6 @@ const ConversationHistory = ({ onRoomSelect, onNewChat, onCreateRoom, userName }
                         ) : (
                           <span style={{ color: '#757575' }}>🔴 {room.daysAgo} giorni fa</span>
                         )}
-                        <span style={{ color: '#999', marginLeft: '10px' }}>
-                          (Stanza chiusa)
-                        </span>
                       </div>
                     </div>
                   </div>

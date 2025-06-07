@@ -27,19 +27,6 @@ const Chat = () => {
   const userName = queryParams.get("userName")?.trim();
   const createRoom = queryParams.get("createRoom") === 'true';
 
-  // Funzione per salvare log nel localStorage per debugging
-  const addLog = useCallback((message, type = 'info') => {
-    console.log(`[Chat ${type}] ${message}`);
-    const logs = JSON.parse(localStorage.getItem('chatLogs') || '[]');
-    logs.push({
-      time: new Date().toISOString(),
-      message,
-      type
-    });
-    if (logs.length > 100) logs.shift();
-    localStorage.setItem('chatLogs', JSON.stringify(logs));
-  }, []);
-
   // Gestione creazione stanza se richiesta
   useEffect(() => {
     if (!createRoom || !connection || !userName || roomCreationAttempted.current) {
@@ -51,11 +38,7 @@ const Chat = () => {
       
       const handleCreateRoom = async () => {
         try {
-          // addLog("Creazione nuova stanza richiesta");
-          
           const roomId = await connection.invoke('CreateRoom', userName, language);
-          // addLog(`Stanza creata con ID: ${roomId}`);
-          
           setRoomCreated(true);
           
           // Genera il link condivisibile
@@ -70,7 +53,6 @@ const Chat = () => {
           
         } catch (error) {
           console.error('Errore nella creazione della stanza:', error);
-          // addLog(`Errore creazione stanza: ${error.message}`, 'error');
           roomCreationAttempted.current = false; // Reset in caso di errore
         } finally {
           setIsCreatingRoom(false);
@@ -81,10 +63,213 @@ const Chat = () => {
     }
   }, [createRoom, connection, userName, language, roomCreated, isCreatingRoom]);
 
+  // Registrazione handler SignalR (solo quando cambia la connessione)
+  useEffect(() => {
+    if (!connection) {
+      return;
+    }
+
+    if (hasInitialized.current) {
+      return;
+    }
+
+    hasInitialized.current = true;
+
+    // Handler per messaggi di testo
+    connection.on('ReceiveMessage', (user, receivedMessage) => {
+      setMessages(prevMessages => [...prevMessages, { 
+        user, 
+        text: receivedMessage, 
+        time: new Date(),
+        type: 'text',
+        id: Date.now()
+      }]);
+    });
+
+    // Handler per chunk audio
+    connection.on('ReceiveAudioChunk', (user, chunkBase64, chunkId, isLastChunk, totalChunks) => {
+      if (user === userName) {
+        return; // Ignora i propri messaggi audio (già aggiunti localmente)
+      }
+      
+      if (chunkId === 0) {
+        // Primo chunk - crea nuovo messaggio audio
+        setMessages(prevMessages => [...prevMessages, { 
+          user, 
+          audioChunks: [chunkBase64],
+          totalChunks: totalChunks,
+          receivedChunks: 1,
+          isComplete: isLastChunk,
+          time: new Date(),
+          type: 'audio',
+          id: Date.now() 
+        }]);
+      } else {
+        // Chunk successivi - aggiorna messaggio esistente
+        setMessages(prevMessages => {
+          const audioMessages = prevMessages.filter(m => 
+            m.type === 'audio' && m.user === user && !m.isComplete);
+          
+          if (audioMessages.length === 0) {
+            return prevMessages;
+          }
+          
+          const lastAudioMessage = audioMessages[audioMessages.length - 1];
+          
+          return prevMessages.map(msg => {
+            if (msg === lastAudioMessage) {
+              if (msg.audioChunks.length > chunkId) {
+                return msg; // Chunk già presente
+              }
+              
+              const newAudioChunks = [...msg.audioChunks, chunkBase64];
+              const isComplete = isLastChunk || newAudioChunks.length === totalChunks;
+              
+              let audioUrl = msg.audioUrl;
+              if (isComplete && !audioUrl) {
+                try {
+                  const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/wav');
+                  audioUrl = URL.createObjectURL(audioBlob);
+                } catch (error) {
+                  console.error('Errore nella creazione del blob audio:', error);
+                }
+              }
+              
+              return {
+                ...msg,
+                audioChunks: newAudioChunks,
+                receivedChunks: msg.receivedChunks + 1,
+                isComplete: isComplete,
+                audioUrl: audioUrl
+              };
+            }
+            return msg;
+          });
+        });
+      }
+    });
+
+    // Handler per notifiche stanza
+    connection.on('JoinedRoom', (roomJoined, actualUserName) => {
+      const originalUserName = new URLSearchParams(location.search).get("userName");
+      
+      if (actualUserName !== originalUserName) {
+        setMessages(prevMessages => [...prevMessages, {
+          user: 'System',
+          text: `Il tuo nome è stato cambiato in "${actualUserName}" per evitare duplicati`,
+          time: new Date(),
+          type: 'system',
+          id: Date.now()
+        }]);
+      }
+    });
+
+    connection.on('UserJoined', (user, userLang) => {
+      if (user !== userName) {
+        setMessages(prevMessages => [...prevMessages, {
+          user: 'System',
+          text: `${user} è entrato nella stanza (${userLang || 'lingua non specificata'})`,
+          time: new Date(),
+          type: 'system',
+          id: Date.now()
+        }]);
+      }
+    });
+
+    connection.on('UserLeft', (user) => {
+      setMessages(prevMessages => [...prevMessages, {
+        user: 'System',
+        text: `${user} ha lasciato la stanza`,
+        time: new Date(),
+        type: 'system',
+        id: Date.now()
+      }]);
+    });
+
+    connection.on('ReceiveTranslatedAudio', (user, audioBase64, targetLanguage, translatedText) => {
+      try {
+        const audioBlob = base64ToBlob(audioBase64, 'audio/wav');
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        setMessages(prevMessages => [...prevMessages, { 
+          user, 
+          audioUrl: audioUrl,
+          isComplete: true,
+          translatedText: translatedText,
+          time: new Date(),
+          type: 'translatedAudio',
+          language: targetLanguage,
+          id: Date.now() 
+        }]);
+      } catch (error) {
+        console.error('Errore nella conversione dell\'audio tradotto:', error);
+      }
+    });
+
+    connection.on('RoomDestroyed', (destroyedRoomName) => {
+      if (destroyedRoomName === roomName) {
+        setMessages(prevMessages => [...prevMessages, {
+          user: 'System',
+          text: `🗑️ La stanza è stata chiusa perché vuota. La conversazione è terminata.`,
+          time: new Date(),
+          type: 'system',
+          id: Date.now()
+        }]);
+      }
+    });
+
+    // Cleanup function
+    return () => {
+      hasInitialized.current = false;
+      connection.off('ReceiveMessage');
+      connection.off('ReceiveAudioChunk');
+      connection.off('JoinedRoom');
+      connection.off('UserJoined');
+      connection.off('UserLeft');
+      connection.off('ReceiveTranslatedAudio');
+      connection.off('RoomDestroyed');
+      
+      // Revoca URL degli oggetti audio
+      messages.forEach(msg => {
+        if ((msg.type === 'audio' || msg.type === 'translatedAudio') && msg.audioUrl) {
+          URL.revokeObjectURL(msg.audioUrl);
+        }
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection, userName, roomName, location.search]);
+
+  // Logging nel CosmosDB quando vengono aggiunti nuovi messaggi
+  useEffect(() => {
+    if (messages.length === 0) return;
+    
+    const lastMessage = messages[messages.length - 1];
+    
+    // Logga solo i messaggi di testo dell'utente (non di sistema)
+    if (lastMessage.type === 'text' && lastMessage.user !== 'System' && roomName) {
+      const logMessage = async () => {
+        try {
+          await fetch('/api/ConversationHistory/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomName: roomName,
+              userName: lastMessage.user,
+              message: lastMessage.text,
+              language: language,
+              messageType: 'text'
+            })
+          });
+        } catch (error) {
+          console.error('Errore nel logging del messaggio:', error);
+        }
+      };
+      
+      logMessage();
+    }
+  }, [messages, roomName, language]);
 
   const handleAudioRecorded = useCallback((audioUrl, base64Chunks) => {
-    addLog('Audio registrato localmente');
-    
     setMessages(prevMessages => [...prevMessages, { 
       user: userName, 
       audioUrl: audioUrl,
@@ -96,7 +281,7 @@ const Chat = () => {
       type: 'audio',
       id: Date.now(),
     }]);
-  }, [userName, addLog]);
+  }, [userName]);
 
   const copyToClipboard = async (text) => {
     try {
@@ -127,199 +312,6 @@ const Chat = () => {
     const mailUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.open(mailUrl);
   };
-
-  useEffect(() => {
-    if (!connection) {
-      addLog("No SignalR connection available yet", "warn");
-      return;
-    }
-
-    // Evita di configurare gli handler multipli
-    if (hasInitialized.current) {
-      return;
-    }
-
-    hasInitialized.current = true;
-    addLog("Setting up SignalR event handlers");
-
-    setMessages([{
-      user: "System",
-      text: "Connessione alla chat stabilita",
-      time: new Date(),
-      type: "system"
-    }]);
-
-    // Registra il gestore per ricevere i messaggi di testo
-    connection.on('ReceiveMessage', (user, receivedMessage) => {
-      addLog(`Messaggio ricevuto da ${user}: ${receivedMessage}`);
-            
-      setMessages(prevMessages => {
-        const newMessages = [...prevMessages, { 
-          user, 
-          text: receivedMessage, 
-          time: new Date(),
-          type: 'text'
-        }];
-        addLog(`Nuova lunghezza messaggi: ${newMessages.length}`);
-        return newMessages;
-      });
-    });
-
-    // Registra il gestore per ricevere i chunk audio
-    connection.on('ReceiveAudioChunk', (user, chunkBase64, chunkId, isLastChunk, totalChunks) => {
-      console.log(`[AUDIO DEBUG] Ricevuto chunk audio ${chunkId}/${totalChunks} da ${user} (isLastChunk: ${isLastChunk})`);
-      
-      if (user === userName) {
-        console.log('[AUDIO DEBUG] Ignorando chunk audio dal nostro utente poiché già aggiunto localmente');
-        return;
-      }
-      
-      if (chunkId === 0) {
-        console.log(`[AUDIO DEBUG] Creazione nuovo messaggio audio per primo chunk (0/${totalChunks})`);
-        setMessages(prevMessages => [...prevMessages, { 
-          user, 
-          audioChunks: [chunkBase64],
-          totalChunks: totalChunks,
-          receivedChunks: 1,
-          isComplete: isLastChunk,
-          time: new Date(),
-          type: 'audio',
-          id: Date.now() 
-        }]);
-      } else {
-        console.log(`[AUDIO DEBUG] Gestione chunk audio ${chunkId}/${totalChunks}`);
-        setMessages(prevMessages => {
-          const audioMessages = prevMessages.filter(m => 
-            m.type === 'audio' && m.user === user && !m.isComplete);
-          
-          if (audioMessages.length === 0) {
-            console.log('[AUDIO DEBUG] ATTENZIONE: Nessun messaggio audio incompiuto trovato');
-            return prevMessages;
-          }
-          
-          const lastAudioMessage = audioMessages[audioMessages.length - 1];
-          
-          return prevMessages.map(msg => {
-            if (msg === lastAudioMessage) {
-              if (msg.audioChunks.length > chunkId) {
-                console.log(`[AUDIO DEBUG] Chunk ${chunkId} già presente nel messaggio, ignorato`);
-                return msg;
-              }
-              
-              const newAudioChunks = [...msg.audioChunks, chunkBase64];
-              const isComplete = isLastChunk || newAudioChunks.length === totalChunks;
-              
-              let audioUrl = msg.audioUrl;
-              if (isComplete && !audioUrl) {
-                try {
-                  const audioBlob = base64ArrayToBlob(newAudioChunks, 'audio/wav');
-                  audioUrl = URL.createObjectURL(audioBlob);
-                } catch (error) {
-                  console.error('[AUDIO DEBUG] Errore nella creazione del blob audio:', error);
-                }
-              }
-              
-              return {
-                ...msg,
-                audioChunks: newAudioChunks,
-                receivedChunks: msg.receivedChunks + 1,
-                isComplete: isComplete,
-                audioUrl: audioUrl
-              };
-            }
-            return msg;
-          });
-        });
-      }
-    });
-
-    connection.on('JoinedRoom', (roomJoined, actualUserName) => {
-      const originalUserName = new URLSearchParams(location.search).get("userName");
-      
-      if (actualUserName !== originalUserName) {
-        setMessages(prevMessages => [...prevMessages, {
-          user: 'System',
-          text: `Il tuo nome è stato cambiato in "${actualUserName}" per evitare duplicati`,
-          time: new Date(),
-          type: 'system'
-        }]);
-      }
-    });
-
-    connection.on('UserJoined', (user, userLang) => {
-      if (user !== userName) {
-        addLog(`Utente ${user} è entrato nella stanza con lingua: ${userLang}`);
-        setMessages(prevMessages => [...prevMessages, {
-          user: 'System',
-          text: `${user} è entrato nella stanza (${userLang})`,
-          time: new Date(),
-          type: 'system'
-        }]);
-      }
-    });
-
-    connection.on('UserLeft', (user) => {
-      addLog(`Utente ${user} ha lasciato la stanza`);
-      setMessages(prevMessages => [...prevMessages, {
-        user: 'System',
-        text: `${user} ha lasciato la stanza`,
-        time: new Date(),
-        type: 'system'
-      }]);
-    });
-
-    connection.on('ReceiveTranslatedAudio', (user, audioBase64, targetLanguage, translatedText) => {
-      addLog(`Ricevuto audio tradotto da ${user} in lingua ${targetLanguage}`);
-      
-      try {
-        const audioBlob = base64ToBlob(audioBase64, 'audio/wav');
-        const audioUrl = URL.createObjectURL(audioBlob);
-        
-        setMessages(prevMessages => [...prevMessages, { 
-          user, 
-          audioUrl: audioUrl,
-          isComplete: true,
-          translatedText: translatedText,
-          time: new Date(),
-          type: 'translatedAudio',
-          language: targetLanguage,
-          id: Date.now() 
-        }]);
-      } catch (error) {
-        console.error('Errore nella conversione dell\'audio tradotto:', error);
-      }
-    });
-
-    // Gestisci la notifica di stanza distrutta
-    connection.on('RoomDestroyed', (destroyedRoomName) => {
-      if (destroyedRoomName === roomName) {
-        setMessages(prevMessages => [...prevMessages, {
-          user: 'System',
-          text: `🗑️ La stanza è stata chiusa perché vuota. La conversazione è terminata.`,
-          time: new Date(),
-          type: 'system'
-        }]);
-      }
-    });
-
-    // Gestisce la disconnessione
-    return () => {
-      addLog("Pulizia event handlers");
-      connection.off('ReceiveMessage');
-      connection.off('ReceiveAudioChunk');
-      connection.off('UserJoined');
-      connection.off('UserLeft');
-      connection.off('RoomCreated');
-      connection.off('RoomDestroyed');
-      
-      // Revoco gli URL degli oggetti audio
-      messages.forEach(msg => {
-        if (msg.type === 'audio' && msg.audioUrl) {
-          URL.revokeObjectURL(msg.audioUrl);
-        }
-      });
-    };
-  }, [connection, userName, addLog, roomName, language, location.search, messages]);
 
   if (!userName || (!roomName && !createRoom)) {
     return (
@@ -356,7 +348,6 @@ const Chat = () => {
       {/* Pulsanti di controllo */}
       <div style={{ marginBottom: '15px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
         <button onClick={() => {
-          addLog("return login");
           window.location.href = "/";
         }} style={{
           padding: '8px 16px',
@@ -390,21 +381,6 @@ const Chat = () => {
           </button>
         )}
 
-        {/*
-        {roomName && (
-          <div style={{
-            padding: '8px 12px',
-            backgroundColor: '#2196F3',
-            color: 'white',
-            borderRadius: '4px',
-            fontSize: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px'
-          }}>
-            🔒 Stanza Privata
-          </div>
-        )} */}
       </div>
       
       {/* UserList component */}
@@ -450,21 +426,6 @@ const Chat = () => {
             </div>
           )}
         </div>
-        
-        {/* Avviso stanza temporanea */}
-        {roomName && roomUsers.length > 0 && (
-          <div style={{
-            marginTop: '10px',
-            padding: '8px 12px',
-            backgroundColor: '#fff3cd',
-            border: '1px solid #ffeaa7',
-            borderRadius: '6px',
-            fontSize: '12px',
-            color: '#856404'
-          }}>
-            ⚠️ <strong>Stanza temporanea:</strong> Quando tutti escono, la stanza viene eliminata definitivamente.
-          </div>
-        )}
       </div>
       
       <MessageList messages={messages} />
@@ -572,18 +533,6 @@ const Chat = () => {
                 📧 Email
               </button>
             </div>
-
-            {/* <div style={{
-              padding: '15px',
-              backgroundColor: '#e8f4fd',
-              borderRadius: '8px',
-              marginBottom: '20px',
-              fontSize: '14px',
-              color: '#555'
-            }}>
-              💡 <strong>Ricorda:</strong> La stanza si chiuderà automaticamente quando tutti escono. 
-              Il link funzionerà solo finché almeno una persona rimane connessa.
-            </div> */}
 
             <button
               onClick={() => setShowLinkModal(false)}
