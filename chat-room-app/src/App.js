@@ -45,9 +45,6 @@ const UserInfo = () => {
       <div style={{ marginBottom: '8px' }}>
         <strong>Benvenuto:</strong> {accounts[0]?.name || 'Utente'}
       </div>
-      {/* <div style={{ marginBottom: '8px' }}>
-        <strong>Email:</strong> {accounts[0]?.username || 'N/A'}
-      </div> */}
       <button 
         onClick={handleLogout}
         style={{

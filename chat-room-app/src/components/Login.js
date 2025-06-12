@@ -75,21 +75,6 @@ const CreateRoom = ({ onBack }) => {
         }}>
           🎯 Crea Nuova Stanza
         </h2>
-
-        {/* <div style={{ 
-          marginBottom: '25px', 
-          padding: '20px', 
-          backgroundColor: '#e8f4fd', 
-          borderRadius: '12px',
-          fontSize: '14px'
-        }}>
-          <p style={{ margin: '0', color: '#555' }}>
-            🔒 <strong>Stanza privata:</strong> Solo chi ha il link può accedere
-          </p>
-          <p style={{ margin: '8px 0 0 0', color: '#555' }}>
-            🗑️ <strong>Temporanea:</strong> Si distrugge quando resta vuota
-          </p>
-        </div> */}
         
         <div style={{ marginBottom: '25px', textAlign: 'left' }}>
           <label style={{ 
