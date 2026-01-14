@@ -183,7 +183,7 @@ TOTALE: ~€124/mese
 ## 📞 **Contatti**
 
 - 📧 **Email**: [g.forlenza@studenti.unisa.it]
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/gforlenza/speakswap/issues)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/GiovanniForlenza/SpeakSwap/issues)
 - 🎓 **Università**: [Università degli Studi di Salerno](https://www.unisa.it)
 
 ---
